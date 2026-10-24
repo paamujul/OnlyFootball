@@ -4,6 +4,7 @@ venv/
 *venv*/
 ENV/
 env/
+playbook_venv/
 
 # Python Cache & Artifacts
 __pycache__/
