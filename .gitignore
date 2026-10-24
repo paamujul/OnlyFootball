@@ -1,0 +1,22 @@
+# Python Virtual Environments
+.venv/
+venv/
+*venv*/
+ENV/
+env/
+
+# Python Cache & Artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+
+# OS / Editor files
+.DS_Store
+.idea/
+.vscode/
+
+# Environment files
+.env
+.env.local
