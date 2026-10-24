@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+*.egg-info/
+
+# Data artifacts (large downloads + local database)
+backend/storage/*.parquet
+backend/storage/*.db
+backend/storage/cache/
+
+# Node
+node_modules/
+frontend/dist/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+
+# Env
+.env
+backend/storage/*.db-wal
+backend/storage/*.db-shm
+
+# stray local clone of this same repo (see DEPLOY_ORACLE.md step 4)
+/nfl_analytics/
+
+# Local-only architecture notes, deliberately never committed
+ARCHITECTURE.local.html

@@ -1,0 +1,221 @@
+"""Backfill / maintenance commands. Also the entrypoint for scheduled jobs.
+
+    python -m app.cli init-db                 create tables (local SQLite only)
+    python -m app.cli seed                    full first-time load
+    python -m app.cli poll-once               one live ESPN cycle, then exit
+    python -m app.cli refresh-nflverse 2026   nflverse refresh + sync_log prune
+    python -m app.cli backfill-nflverse 2025  one season from nflverse
+    python -m app.cli backfill-espn 2026 pre  one ESPN phase (pre|reg|post)
+    python -m app.cli coaches-review          what in coaches.yml still needs a human
+    python -m app.cli train 2025              fit the play-call model (see below)
+
+Every command exits non-zero when the work actually failed, so Cloud Scheduler
+and CI report red instead of silently succeeding at nothing.
+"""
+from __future__ import annotations
+
+import asyncio
+import logging
+import sys
+
+PHASE_WEEKS = {"pre": range(1, 5), "reg": range(1, 19), "post": range(1, 5)}
+
+
+def _arg_int(args: list[str], i: int, name: str) -> int:
+    try:
+        return int(args[i])
+    except (IndexError, ValueError):
+        raise SystemExit(f"{name} is required and must be an integer")
+
+
+def _cmd_seed() -> int:
+    from app.data.seed import _seed
+    _seed()
+    return 0
+
+
+def _cmd_poll_once() -> int:
+    from app.data import espn_source as espn
+    from app.data.ingest import poll_once
+
+    async def run() -> int:
+        client = espn.EspnClient()
+        try:
+            return await poll_once(client)
+        finally:
+            await client.close()
+
+    delay = asyncio.run(run())
+    print(f"poll complete; next cycle would be in {delay}s")
+    return 0
+
+
+def _cmd_refresh_nflverse(season: int) -> int:
+    from app.data.seed import prune_sync_log, refresh_nflverse
+    failed = refresh_nflverse(season)
+    print(f"nflverse refresh {season}: {failed} step(s) failed")
+    print(f"pruned {prune_sync_log()} sync_log row(s)")
+    return 1 if failed else 0
+
+
+def _cmd_backfill_nflverse(season: int) -> int:
+    from app.data.nflverse_source import backfill_season
+    out = backfill_season(season)
+    print(f"nflverse {season}: {out}")
+    return 1 if out.get("failed") else 0
+
+
+def _cmd_train(season: int) -> int:
+    """Fit the play-call model, holding `season` out as the validation year.
+
+    RUN THIS IN A 4 GiB CLOUD RUN JOB, NOT ON THE VM. It imports lightgbm, numpy
+    and scipy (~120 MB of RSS before any data is read) and peaks around 600 MB
+    on the five-season backfill; the VM has 1-2 GB and is serving the API. The
+    import is inside this function for the same reason -- `python -m app.cli
+    poll-once` must not pay for the trainer.
+
+    Exits non-zero when the situational model fails to beat nflverse's `xpass`
+    on the held-out season, so a scheduled retrain that regresses shows up red
+    instead of quietly replacing a good model with a worse one.
+    """
+    from app.ml.train import format_report, run
+    out = run(season)
+    print(format_report(out))
+    return 0 if out["situation"]["beats_baseline"] else 1
+
+
+def _cmd_backfill_espn(season: int, phase: str) -> int:
+    if phase not in PHASE_WEEKS:
+        raise SystemExit(f"phase must be one of {sorted(PHASE_WEEKS)}, got {phase!r}")
+    from app.data.ingest import backfill_phase
+    out = asyncio.run(backfill_phase(season, phase, PHASE_WEEKS[phase]))
+    print(f"espn {season} {phase}: {out}")
+    # seeing games but storing none is a real failure; seeing none is just an
+    # unplayed phase (post-season weeks don't exist until January)
+    return 1 if out["games_seen"] and not out["games_ingested"] else 0
+
+
+def _cmd_coaches_review(season: int | None = None) -> int:
+    """Print what in deploy/data/coaches.yml still needs a human, worst first.
+
+    The coordinator fields are model-generated and every row ships
+    verified: false. This does not check them -- nothing here can, since no
+    dataset carries coordinators -- it just says where the gaps are so the
+    review is finite instead of "read 640 fields".
+
+    Priority order is deliberate. offensive_play_caller drives the model's
+    attribution, so a null there (which silently falls back to the head coach)
+    matters more than a null oc/dc, which are display-only today.
+    """
+    import yaml
+    from app.config import BACKEND_DIR
+
+    path = BACKEND_DIR.parent / "deploy" / "data" / "coaches.yml"
+    doc = yaml.safe_load(path.read_text())
+    staff = doc["staff"]
+    seasons = [season] if season else sorted(staff)
+
+    fields = ("head_coach", "oc", "dc",
+              "offensive_play_caller", "defensive_play_caller")
+    filled = {f: 0 for f in fields}
+    blank = {f: 0 for f in fields}
+    unverified = 0
+    rows = 0
+    gaps: list[tuple[int, str, list[str]]] = []
+    notes: list[tuple[int, str, str]] = []
+
+    for s_ in seasons:
+        for team in sorted(staff.get(s_, {})):
+            e = staff[s_][team]
+            rows += 1
+            if not e.get("verified"):
+                unverified += 1
+            missing = []
+            for f in fields:
+                if e.get(f):
+                    filled[f] += 1
+                else:
+                    blank[f] += 1
+                    missing.append(f)
+            if missing:
+                gaps.append((s_, team, missing))
+            if e.get("note"):
+                notes.append((s_, team, e["note"]))
+
+    print(f"coaches.yml -- {rows} team-seasons"
+          f"{'' if season else f' across {len(seasons)} seasons'}\n")
+    print(f"{'field':<24}{'filled':>8}{'null':>8}")
+    for f in fields:
+        print(f"{f:<24}{filled[f]:>8}{blank[f]:>8}")
+    print(f"\nverified: 0 of {rows}  (every row ships verified: false)")
+
+    caller_gaps = [(s_, t) for s_, t, m in gaps if "offensive_play_caller" in m]
+    print(f"\n-- offensive_play_caller is NULL: {len(caller_gaps)} team-seasons")
+    print("   these fall back to the head coach, which the API reports as")
+    print("   fell_back_to_head_coach=true. Highest-value fields to fill.")
+    for s_, t in caller_gaps:
+        print(f"     {s_} {t}")
+
+    other = [(s_, t, [f for f in m if f != "offensive_play_caller"])
+             for s_, t, m in gaps
+             if [f for f in m if f != "offensive_play_caller"]]
+    print(f"\n-- other gaps: {len(other)} team-seasons")
+    for s_, t, m in other[:40]:
+        print(f"     {s_} {t:<5} missing {', '.join(m)}")
+    if len(other) > 40:
+        print(f"     ... and {len(other) - 40} more")
+
+    print(f"\n-- rows carrying a note: {len(notes)}")
+    for s_, t, n in notes:
+        print(f"     {s_} {t:<5} {n[:88]}")
+
+    print("\nAfter editing, re-apply with:")
+    print("  DATABASE_URL=... python -m app.cli backfill-nflverse <season>")
+    print("  (sync_coaching_staff re-reads the YAML and cross-checks head")
+    print("   coaches against nflverse, logging a sync_log error on mismatch)")
+    return 0
+
+
+def main() -> None:
+    logging.basicConfig(level=logging.INFO,
+                        format="%(asctime)s %(name)s %(levelname)s %(message)s")
+    args = sys.argv[1:]
+    if not args:
+        print(__doc__)
+        return
+    cmd, rest = args[0], args[1:]
+
+    if cmd == "init-db":
+        from app.db.session import init_db
+        init_db()
+        print("database initialized")
+        return
+
+    handlers = {
+        "seed": lambda: _cmd_seed(),
+        "poll-once": lambda: _cmd_poll_once(),
+        "refresh-nflverse": lambda: _cmd_refresh_nflverse(_arg_int(rest, 0, "season")),
+        "backfill-nflverse": lambda: _cmd_backfill_nflverse(_arg_int(rest, 0, "season")),
+        "train": lambda: _cmd_train(_arg_int(rest, 0, "season")),
+        "coaches-review": lambda: _cmd_coaches_review(
+            int(rest[0]) if rest else None),
+        "backfill-espn": lambda: _cmd_backfill_espn(
+            _arg_int(rest, 0, "season"), rest[1] if len(rest) > 1 else "pre"),
+    }
+    handler = handlers.get(cmd)
+    if handler is None:
+        print(f"unknown command: {cmd}")
+        print(__doc__)
+        sys.exit(1)
+
+    try:
+        sys.exit(handler())
+    except SystemExit:
+        raise
+    except Exception as e:
+        logging.getLogger("cli").exception("%s failed", cmd)
+        sys.exit(f"{cmd} failed: {e}")
+
+
+if __name__ == "__main__":
+    main()

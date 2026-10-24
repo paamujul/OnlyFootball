@@ -1,0 +1,23 @@
+# Runtime dependencies. Pinned so container rebuilds are reproducible --
+# previously every build resolved to whatever was latest on PyPI.
+# Dev/test-only packages live in requirements-dev.txt.
+fastapi==0.141.1
+uvicorn[standard]==0.52.4
+sqlalchemy==2.0.52
+alembic==1.19.1
+psycopg[binary]==3.3.5
+httpx==0.28.1
+polars==1.44.1
+nflreadpy==0.1.5
+pyarrow==25.0.1
+# Read by app/data/nflverse_source.py for deploy/data/coaches.yml. It was
+# reaching us only because something else happened to install it -- nothing in
+# this file required it, so a resolver change would have broken the coaching
+# loader at runtime rather than at build time.
+pyyaml==6.0.3
+# Play-call model (app/ml/). Pulls numpy and scipy, ~120 MB of RSS between
+# them, so it is imported ONLY inside app/ml -- never at module scope anywhere
+# app.main reaches, exactly as app/db/upsert.py does for polars. Training runs
+# in a 4 GiB Cloud Run Job (`python -m app.cli train 2025`); the API process
+# only ever loads a serialized booster, which is a few MB.
+lightgbm==4.6.0
