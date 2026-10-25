@@ -60,7 +60,7 @@ pip install -r requirements.txt
 
 # 4. Ingest baseline validation data (2025 season + 2026 preseason)
 python -m app.cli backfill-nflverse 2025
-python -m app.cli backfill-espn 2026 pre
+python -m app.cli backfill-espn 2026 reg
 
 # 5. Start the FastAPI backend server
 python -m uvicorn app.main:app --port 8600 --reload
