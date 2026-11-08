@@ -6,7 +6,7 @@ import {
 } from 'recharts';
 import { api } from '../api';
 import type {
-  CoachDefense, CoachDrives, CoachPlaybook, CoachUsage, MixEntry, ScriptSplit, Trajectory,
+  CoachDefense, CoachDrives, CoachPlaybook, CoachUsage, MixEntry, ScriptSplit, TeamHeatmap, Trajectory,
 } from '../api';
 import { PHASE_LABEL, useSeason } from '../state';
 import { VizTooltip } from '../components/VizTooltip';
@@ -14,13 +14,15 @@ import {
   ChartedMetric, CoverageNote, MixBars, RankPill, coverageLevel, num, pct, signed,
 } from '../components/ChartedMetric';
 import { PlayCallerCard } from '../components/PlayCallerCard';
+import { SingleTeamHeatmap } from '../components/FieldHeatmap';
 
-type Tab = 'playbook' | 'drives' | 'usage' | 'defense';
+type Tab = 'playbook' | 'drives' | 'usage' | 'defense' | 'heatmap';
 const TABS: { id: Tab; label: string; blurb: string }[] = [
   { id: 'playbook', label: 'Playbook', blurb: 'personnel, formation and tendency mix' },
   { id: 'drives', label: 'Drives', blurb: 'field position, outcomes and the opening script' },
   { id: 'usage', label: 'Usage', blurb: 'who gets the targets and carries, and when' },
   { id: 'defense', label: 'Defense', blurb: 'fronts, coverage shells and pressure' },
+  { id: 'heatmap', label: "Team's heatmap", blurb: 'passing and rushing field tendencies' },
 ];
 
 const SERIES = ['var(--series-1)', 'var(--series-2)', 'var(--series-3)', 'var(--series-4)',
@@ -372,7 +374,15 @@ function UsageTab({ d }: { d: CoachUsage }) {
 
   const ranked = useMemo(() => {
     const key = metric === 'carry' ? 'carry_share' : metric === 'snap' ? 'snap_share' : 'target_share';
-    return [...d.players].sort((a, b) => (b[key] ?? 0) - (a[key] ?? 0));
+    // Deduplicate by player name: if two rows share a name (e.g. from dual
+    // ESPN/gsis ids leaking through), keep only the one with the higher share.
+    const sorted = [...d.players].sort((a, b) => (b[key] ?? 0) - (a[key] ?? 0));
+    const seen = new Set<string>();
+    return sorted.filter((p) => {
+      if (seen.has(p.name)) return false;
+      seen.add(p.name);
+      return true;
+    });
   }, [d.players, metric]);
 
   // Merge every charted player's weekly shares onto one week axis. Players
@@ -390,7 +400,8 @@ function UsageTab({ d }: { d: CoachUsage }) {
       });
       return row;
     });
-    return { chartData: rows, lines: top.map((p) => p.name) };
+    // Deduplicate line names to avoid duplicate React keys and legend entries.
+    return { chartData: rows, lines: [...new Set(top.map((p) => p.name))] };
   }, [ranked, meta.key]);
 
   const selected = picked ? d.players.find((p) => p.player_id === picked) ?? null : null;
@@ -451,7 +462,7 @@ function UsageTab({ d }: { d: CoachUsage }) {
           <div className="cov-note">no weekly {meta.label.toLowerCase()} recorded</div>
         ) : (
           <ResponsiveContainer width="100%" height={280}>
-            <LineChart data={chartData} margin={{ top: 4, right: 8, left: -18, bottom: 0 }}>
+            <LineChart key={metric} data={chartData} margin={{ top: 4, right: 8, left: -18, bottom: 0 }}>
               <CartesianGrid stroke="var(--grid)" vertical={false} />
               <XAxis dataKey="week" tick={{ fill: 'var(--muted)', fontSize: 11 }}
                 tickLine={false} axisLine={{ stroke: 'var(--baseline)' }} />
@@ -460,7 +471,7 @@ function UsageTab({ d }: { d: CoachUsage }) {
               <Tooltip content={<VizTooltip />} />
               <Legend wrapperStyle={{ fontSize: 12.5 }} />
               {lines.map((name, i) => (
-                <Line key={name} type="monotone" dataKey={name} stroke={SERIES[i % SERIES.length]}
+                <Line key={`${metric}-${name}`} type="monotone" dataKey={name} stroke={SERIES[i % SERIES.length]}
                   strokeWidth={2} dot={{ r: 2 }} connectNulls={false} />
               ))}
             </LineChart>
@@ -713,6 +724,7 @@ export default function CoachPage() {
   const [drives, setDrives] = useState<CoachDrives | null>(null);
   const [usage, setUsage] = useState<CoachUsage | null>(null);
   const [defense, setDefense] = useState<CoachDefense | null>(null);
+  const [heatmap, setHeatmap] = useState<TeamHeatmap | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -720,18 +732,20 @@ export default function CoachPage() {
   // the other three load alongside it and each section handles its own gap.
   useEffect(() => {
     let stale = false;
-    setPlaybook(null); setDrives(null); setUsage(null); setDefense(null);
+    setPlaybook(null); setDrives(null); setUsage(null); setDefense(null); setHeatmap(null);
     setError(null); setLoading(true);
     Promise.allSettled([
       api.coachPlaybook(abbr, season, phase),
       api.coachUsage(abbr, season, phase),
       api.coachDefense(abbr, season, phase),
-    ]).then(([pb, us, df]) => {
+      api.heatmapTeam(abbr, season, phase),
+    ]).then(([pb, us, df, hm]) => {
       if (stale) return;
       if (pb.status === 'fulfilled') setPlaybook(pb.value);
       else setError(String(pb.reason));
       if (us.status === 'fulfilled') setUsage(us.value);
       if (df.status === 'fulfilled') setDefense(df.value);
+      if (hm.status === 'fulfilled') setHeatmap(hm.value);
       setLoading(false);
     });
     return () => { stale = true; };
@@ -794,6 +808,10 @@ export default function CoachPage() {
       {tab === 'defense' && (defense
         ? <DefenseTab d={defense} />
         : <div className="error-box">Defensive profile unavailable for this team-season.</div>)}
+
+      {tab === 'heatmap' && (heatmap
+        ? <SingleTeamHeatmap data={heatmap} />
+        : <div className="loading">Loading team heatmap…</div>)}
 
       <div className="note" style={{ marginTop: 28, borderTop: '1px solid var(--grid)', paddingTop: 12 }}>
         Play-caller attribution on this page is model-generated and unverified. Figures marked

@@ -500,6 +500,90 @@ def test_usage_snap_counts_absent_outside_the_regular_season(seeded):
     assert out["snap_counts_available"] is False
 
 
+def test_usage_merges_espn_and_gsis_ids_for_same_player(session):
+    """The same physical player appears under two ids -- a gsis id from
+    nflverse and an 'espn:XXXX' id from the ESPN live ingester -- when both
+    sources have contributed plays.  The usage endpoint must merge them into
+    a single row rather than listing the player twice."""
+    upsert_all(session, Team, [
+        {"abbr": "KC", "name": "Kansas City Chiefs"},
+        {"abbr": "BAL", "name": "Baltimore Ravens"},
+    ])
+    # Two Player rows for the same person, one gsis and one ESPN.
+    upsert_all(session, Player, [
+        {"id": "00-WR1", "name": "Star Receiver", "position": "WR", "team": "KC"},
+        {"id": "espn:9999", "name": "Star Receiver", "position": "WR",
+         "team": "KC", "espn_id": "9999"},
+    ])
+    # Two games: week 1 has plays from nflverse (gsis ids), week 2 from ESPN.
+    upsert_all(session, Game, [
+        {"id": "G1", "season": SEASON, "phase": "reg", "week": 1,
+         "home_team": "KC", "away_team": "BAL", "status": "final", "source": "nflverse"},
+        {"id": "G2", "season": SEASON, "phase": "reg", "week": 2,
+         "home_team": "KC", "away_team": "BAL", "status": "final", "source": "espn"},
+    ])
+    upsert_all(session, Play, [
+        # Week 1: two targets under gsis id
+        {"game_id": "G1", "play_id": 1, "posteam": "KC", "defteam": "BAL",
+         "play_type": "pass", "receiver_id": "00-WR1", "yards_gained": 5.0},
+        {"game_id": "G1", "play_id": 2, "posteam": "KC", "defteam": "BAL",
+         "play_type": "pass", "receiver_id": "00-WR1", "yards_gained": 8.0},
+        # Week 2: three targets under ESPN id
+        {"game_id": "G2", "play_id": 1, "posteam": "KC", "defteam": "BAL",
+         "play_type": "pass", "receiver_id": "espn:9999", "yards_gained": 6.0},
+        {"game_id": "G2", "play_id": 2, "posteam": "KC", "defteam": "BAL",
+         "play_type": "pass", "receiver_id": "espn:9999", "yards_gained": 7.0},
+        {"game_id": "G2", "play_id": 3, "posteam": "KC", "defteam": "BAL",
+         "play_type": "pass", "receiver_id": "espn:9999", "yards_gained": 3.0},
+    ])
+    session.commit()
+
+    out = team_usage(session, "KC", SEASON, "reg")
+    # The player must appear exactly once.
+    star_rows = [p for p in out["players"] if p["name"] == "Star Receiver"]
+    assert len(star_rows) == 1, (
+        f"Expected 1 row for Star Receiver, got {len(star_rows)}: "
+        f"{[r['player_id'] for r in star_rows]}"
+    )
+    # And the merged total is 2 + 3 = 5 targets.
+    assert star_rows[0]["targets"] == 5
+    # The trajectory should cover both weeks.
+    weeks = [w["week"] for w in star_rows[0]["target_trajectory"]["weeks"]]
+    assert sorted(weeks) == [1, 2]
+
+
+def test_usage_merges_espn_and_gsis_with_name_variation(session):
+    """Handle name variations such as nicknames ('Matt' vs 'Matthew') and suffixes
+    ('Jr.', 'III') between ESPN and nflverse player entries."""
+    upsert_all(session, Team, [
+        {"abbr": "BAL", "name": "Baltimore Ravens"},
+        {"abbr": "KC", "name": "Kansas City Chiefs"},
+    ])
+    # Matthew Hibner in nflverse vs Matt Hibner in ESPN
+    upsert_all(session, Player, [
+        {"id": "00-HIBNER", "name": "Matthew Hibner", "position": "TE", "team": "BAL"},
+        {"id": "espn:4432260", "name": "Matt Hibner", "position": "TE", "team": "BAL", "espn_id": "4432260"},
+    ])
+    upsert_all(session, Game, [
+        {"id": "G1", "season": SEASON, "phase": "reg", "week": 1,
+         "home_team": "BAL", "away_team": "KC", "status": "final", "source": "nflverse"},
+        {"id": "G2", "season": SEASON, "phase": "reg", "week": 2,
+         "home_team": "BAL", "away_team": "KC", "status": "final", "source": "espn"},
+    ])
+    upsert_all(session, Play, [
+        {"game_id": "G1", "play_id": 1, "posteam": "BAL", "defteam": "KC",
+         "play_type": "pass", "receiver_id": "00-HIBNER", "yards_gained": 10.0},
+        {"game_id": "G2", "play_id": 1, "posteam": "BAL", "defteam": "KC",
+         "play_type": "pass", "receiver_id": "espn:4432260", "yards_gained": 12.0},
+    ])
+    session.commit()
+
+    out = team_usage(session, "BAL", SEASON, "reg")
+    hibner_rows = [p for p in out["players"] if "Hibner" in p["name"]]
+    assert len(hibner_rows) == 1, f"Expected 1 Hibner row, got: {[r['name'] for r in hibner_rows]}"
+    assert hibner_rows[0]["targets"] == 2
+
+
 # --- defensive personnel --------------------------------------------------
 
 def test_defense_reports_package_and_grouping(seeded):

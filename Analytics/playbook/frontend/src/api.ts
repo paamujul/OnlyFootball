@@ -339,6 +339,178 @@ async function get<T>(path: string): Promise<T> {
   }
 }
 
+export interface HeatmapAdvantage {
+  score: number;
+  tier: 'strong_offense' | 'lean_offense' | 'neutral' | 'lean_defense' | 'strong_defense';
+  tier_label: string;
+  description: string;
+  color: string;
+}
+
+export interface HeatmapReceiverStat {
+  player_id: string;
+  name: string;
+  targets: number;
+  catches: number;
+  comp_pct: number;
+  yards: number;
+  ypr: number;
+  touchdowns: number;
+  epa_avg: number;
+  success_rate: number;
+}
+
+export interface HeatmapPassZone {
+  location: string;
+  depth_band: string;
+  label: string;
+  attempts: number;
+  completions: number;
+  comp_pct: number;
+  yards: number;
+  yards_per_att: number;
+  touchdowns: number;
+  interceptions: number;
+  epa_avg: number;
+  success_rate: number;
+  top_receivers: HeatmapReceiverStat[];
+}
+
+export interface HeatmapPassVector {
+  play_id: number;
+  game_id: string;
+  quarter: number | null;
+  clock: string | null;
+  passer: string;
+  receiver: string;
+  location: string;
+  depth_band: string;
+  depth: number;
+  complete: boolean;
+  yards: number;
+  yac: number | null;
+  touchdown: boolean;
+  interception: boolean;
+  sack: boolean;
+  epa: number | null;
+  desc: string | null;
+}
+
+export interface HeatmapRunGap {
+  gap_key: string;
+  location: string;
+  gap: string | null;
+  label: string;
+  carries: number;
+  yards: number;
+  ypc: number;
+  touchdowns: number;
+  tfls: number;
+  epa_avg: number;
+  success_rate: number;
+}
+
+export interface HeatmapRunVector {
+  play_id: number;
+  game_id: string;
+  quarter: number | null;
+  clock: string | null;
+  rusher: string;
+  gap_key: string;
+  location: string | null;
+  gap: string | null;
+  yards: number;
+  touchdown: boolean;
+  epa: number | null;
+  desc: string | null;
+}
+
+export interface TeamHeatmap {
+  team: { abbr: string; name: string; color: string; color2: string; logo: string | null };
+  sample_games: {
+    game_id: string;
+    week: number;
+    opponent: string;
+    is_home: boolean;
+    team_score: number | null;
+    opp_score: number | null;
+  }[];
+  offense: {
+    passing: { zones: HeatmapPassZone[]; plays: HeatmapPassVector[] };
+    rushing: { gaps: HeatmapRunGap[]; plays: HeatmapRunVector[] };
+  };
+  defense: {
+    passing: { zones: HeatmapPassZone[]; plays: HeatmapPassVector[] };
+    rushing: { gaps: HeatmapRunGap[]; plays: HeatmapRunVector[] };
+  };
+}
+
+export interface MatchupOverlayZone {
+  location: string;
+  depth_band: string;
+  label: string;
+  offense: HeatmapPassZone;
+  defense: HeatmapPassZone;
+  advantage: HeatmapAdvantage;
+}
+
+export interface MatchupOverlayGap {
+  gap_key: string;
+  location: string;
+  gap: string | null;
+  label: string;
+  offense: HeatmapRunGap;
+  defense: HeatmapRunGap;
+  advantage: HeatmapAdvantage;
+}
+
+export interface MatchupOverlayMap {
+  title: string;
+  offense_team: { abbr: string; name: string; color: string; color2: string; logo: string | null };
+  defense_team: { abbr: string; name: string; color: string; color2: string; logo: string | null };
+  offense_sample_games: { game_id: string; week: number; opponent: string; is_home: boolean; team_score: number | null; opp_score: number | null }[];
+  defense_sample_games: { game_id: string; week: number; opponent: string; is_home: boolean; team_score: number | null; opp_score: number | null }[];
+  passing_zones: MatchupOverlayZone[];
+  passing_plays: HeatmapPassVector[];
+  rushing_gaps: MatchupOverlayGap[];
+  rushing_plays: HeatmapRunVector[];
+}
+
+export interface MatchupHeatmap {
+  season: number;
+  phase: string;
+  sample_games_window: number;
+  team_a: { abbr: string; name: string; color: string; color2: string; logo: string | null };
+  team_b: { abbr: string; name: string; color: string; color2: string; logo: string | null };
+  map_a_vs_b: MatchupOverlayMap;
+  map_b_vs_a: MatchupOverlayMap;
+}
+
+export interface UpcomingMatchupTeam {
+  abbr: string;
+  name: string;
+  conference?: string | null;
+  division?: string | null;
+  color: string;
+  color2: string;
+  logo: string | null;
+}
+
+export interface UpcomingMatchupsResponse {
+  season: number;
+  phase: string;
+  active_week: number;
+  matchups: {
+    game_id: string;
+    week: number;
+    kickoff: string | null;
+    status: string;
+    home: UpcomingMatchupTeam;
+    away: UpcomingMatchupTeam;
+  }[];
+  teams: UpcomingMatchupTeam[];
+}
+
 export const api = {
   seasons: () => get<SeasonPhases[]>('/api/seasons'),
   teams: (season: number, phase: string) =>
@@ -369,4 +541,10 @@ export const api = {
     get<CoachUsage>(`/api/coach/usage?team=${abbr}&season=${season}&phase=${phase}`),
   coachDefense: (abbr: string, season: number, phase: string) =>
     get<CoachDefense>(`/api/coach/defense?team=${abbr}&season=${season}&phase=${phase}`),
+  heatmapUpcoming: (season: number, phase: string) =>
+    get<UpcomingMatchupsResponse>(`/api/heatmap/upcoming?season=${season}&phase=${phase}`),
+  heatmapMatchup: (teamA: string, teamB: string, season: number, phase: string, games: number = 4) =>
+    get<MatchupHeatmap>(`/api/heatmap/matchup?teamA=${teamA}&teamB=${teamB}&season=${season}&phase=${phase}&games=${games}`),
+  heatmapTeam: (team: string, season: number, phase: string, games: number = 4) =>
+    get<TeamHeatmap>(`/api/heatmap/team?team=${team}&season=${season}&phase=${phase}&games=${games}`),
 };

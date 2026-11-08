@@ -68,6 +68,34 @@ def _seed() -> None:
             _running = False
 
 
+def sync_snap_counts_if_behind(season: int | None = None) -> bool:
+    """Sync snap counts if they are behind completed regular season games."""
+    from app.data.nflverse_source import sync_snap_counts
+    from app.db.models import SnapCount
+
+    if season is None:
+        season = max(SEED_SEASONS)
+
+    with db_session() as s:
+        max_game_week = s.scalar(
+            select(func.max(Game.week)).where(Game.season == season, Game.phase == "reg", Game.status == "final")
+        )
+        max_snap_week = s.scalar(
+            select(func.max(SnapCount.week)).where(SnapCount.season == season)
+        )
+
+    if max_game_week and (max_snap_week is None or max_snap_week < max_game_week):
+        log.info("snap_counts for %s is at week %s, behind played games (week %s) - syncing",
+                 season, max_snap_week, max_game_week)
+        try:
+            sync_snap_counts(season)
+            return True
+        except Exception as e:
+            log.warning("failed to sync snap counts for %s: %s", season, e)
+            return False
+    return False
+
+
 def start_seed_if_needed() -> bool:
     """Kick off seeding on a daemon thread when the DB has no games yet."""
     global _running
@@ -75,6 +103,8 @@ def start_seed_if_needed() -> bool:
         if _running:
             return False
         if not database_is_empty():
+            # If the DB is already seeded, check if live snap counts need a catch-up
+            threading.Thread(target=sync_snap_counts_if_behind, name="snap-catchup", daemon=True).start()
             return False
         _running = True
     threading.Thread(target=_seed, name="seed", daemon=True).start()

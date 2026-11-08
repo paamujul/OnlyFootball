@@ -11,6 +11,7 @@ import ComparePage from './pages/ComparePage'
 import DefenseLabPage from './pages/DefenseLabPage'
 import CoachPage from './pages/CoachPage'
 import CoachIndexPage from './pages/CoachIndexPage'
+import HeatmapPage from './pages/HeatmapPage'
 
 const router = createBrowserRouter([
   {
@@ -24,6 +25,7 @@ const router = createBrowserRouter([
       { path: 'defense', element: <DefenseLabPage /> },
       { path: 'coach', element: <CoachIndexPage /> },
       { path: 'coach/:abbr', element: <CoachPage /> },
+      { path: 'heatmap', element: <HeatmapPage /> },
     ],
   },
 ])

@@ -24,16 +24,18 @@ PASS_TYPES = {
 }
 RUSH_TYPES = {"Rush", "Rushing Touchdown", "Fumble Recovery (Own)", "Fumble Recovery (Opponent)"}
 
+PLAYER_NAME = r"(?:[A-Z]\.(?:[A-Z]\.\s*|St\.\s*)?|[A-Z][\w'.-]*\.)[\w'-]+(?: [JS]r\.)?(?: I{2,3}V?)?"
+
 RE_PASS = re.compile(
-    r"(?P<passer>[A-Z][\w'.-]*\.[\w'-]+(?: [JS]r\.)?(?: I{2,3}V?)?) pass"
+    rf"(?P<passer>{PLAYER_NAME}) pass"
     r"(?P<inc> incomplete)? (?P<depth>short|deep) (?P<loc>left|middle|right)"
-    r"(?: (?:to|intended for) (?P<receiver>[A-Z][\w'.-]*\.[\w'-]+(?: [JS]r\.)?(?: I{2,3}V?)?))?"
+    rf"(?: (?:to|intended for) (?P<receiver>{PLAYER_NAME}))?"
 )
 RE_RUSH = re.compile(
-    r"(?P<rusher>[A-Z][\w'.-]*\.[\w'-]+(?: [JS]r\.)?(?: I{2,3}V?)?) "
+    rf"(?P<rusher>{PLAYER_NAME}) "
     r"(?P<dir>up the middle|left end|left tackle|left guard|right guard|right tackle|right end|scrambles)"
 )
-RE_SACK = re.compile(r"(?P<passer>[A-Z][\w'.-]*\.[\w'-]+(?: [JS]r\.)?(?: I{2,3}V?)?) sacked")
+RE_SACK = re.compile(rf"(?P<passer>{PLAYER_NAME}) sacked")
 
 RUN_DIR = {
     "up the middle": ("middle", "guard"),
@@ -261,7 +263,7 @@ def normalize_plays(summary: dict, game_id: str, players: list[dict],
                     loc, gap = RUN_DIR.get(m.group("dir"), (None, None))
                     row["run_location"], row["run_gap"] = loc, gap
                 else:
-                    first = re.match(r"(?:\([^)]*\)\s*)?([A-Z][\w'.-]*\.[\w'-]+)", text)
+                    first = re.match(rf"(?:\([^)]*\)\s*)?({PLAYER_NAME})", text)
                     if first:
                         row["rusher_id"] = lut.get((posteam, _norm_name_key(first.group(1))))
             rows.append(row)

@@ -64,6 +64,7 @@ export default function App() {
           <NavLink to="/defense" className={({ isActive }) => (isActive ? 'active' : '')}>Defense lab</NavLink>
           {/* no `end`: stays lit on /coach/:abbr too */}
           <NavLink to="/coach" className={({ isActive }) => (isActive ? 'active' : '')}>Coaching</NavLink>
+          <NavLink to="/heatmap" className={({ isActive }) => (isActive ? 'active' : '')}>Heat map</NavLink>
         </nav>
         <div className="spacer" />
         <SeasonPicker />

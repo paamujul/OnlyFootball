@@ -36,9 +36,10 @@ exchange for nothing.
 from __future__ import annotations
 
 from collections import Counter, defaultdict
+import re
 
 from sqlalchemy import Row, func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 
 from app.analytics.personnel import rate_table
 from app.db.models import Game, Play, Player, SnapCount, Team
@@ -177,6 +178,106 @@ def _series(weekly: dict[int, tuple[int, int]]) -> dict:
             "trend": trend}
 
 
+_NICKNAMES = {
+    "matt": "matthew", "matthew": "matthew",
+    "josh": "joshua", "joshua": "joshua",
+    "dan": "daniel", "danny": "daniel", "daniel": "daniel",
+    "mitch": "mitchell", "mitchell": "mitchell",
+    "mike": "michael", "michael": "michael",
+    "chris": "christopher", "christopher": "christopher",
+    "zach": "zachary", "zack": "zachary", "zachary": "zachary",
+    "alex": "alexander", "alexander": "alexander",
+    "sam": "samuel", "samuel": "samuel",
+    "will": "william", "william": "william",
+    "rob": "robert", "bob": "robert", "robert": "robert",
+    "tom": "thomas", "tommy": "thomas", "thomas": "thomas",
+    "dave": "david", "david": "david",
+    "ken": "kenneth", "kenneth": "kenneth",
+    "tim": "timothy", "timothy": "timothy",
+    "gabe": "gabriel", "gabriel": "gabriel",
+    "jeff": "jeffrey", "jeffrey": "jeffrey",
+    "jake": "jacob", "jacob": "jacob",
+    "nick": "nicholas", "nicholas": "nicholas",
+    "tony": "anthony", "anthony": "anthony",
+    "pat": "patrick", "patrick": "patrick",
+    "drew": "andrew", "andrew": "andrew",
+    "joe": "joseph", "joseph": "joseph",
+    "bryan": "brian", "brian": "brian",
+}
+
+
+def _norm_name(name: str) -> str:
+    """Normalize player name by stripping suffixes, punctuation, and aligning common nicknames."""
+    s = name.lower()
+    s = re.sub(r"\b(jr|sr|ii|iii|iv|v)\b\.?", "", s)
+    s = re.sub(r"['\.\-]", "", s)
+    parts = s.split()
+    if not parts:
+        return ""
+    first = _NICKNAMES.get(parts[0], parts[0])
+    return " ".join([first] + parts[1:])
+
+
+def _espn_to_gsis(session: Session, ids: set[str]) -> dict[str, str]:
+    """Map ESPN-style player ids (``espn:XXXXX``) to their canonical gsis id.
+
+    Players ingested from ESPN land in the ``players`` table with
+    ``id = 'espn:{espn_id}'``.  Separately, the nflverse backfill inserts the
+    same person with a gsis id (``00-XXXXXXX``).  Plays from each source carry
+    the respective id in ``receiver_id`` / ``rusher_id``, so a single person
+    ends up looking like two unless we map one form to the other.
+
+    Matches exact name and team first, then falls back to normalized name
+    (handling suffixes like Jr./III, punctuation, and common nickname variants).
+    Returns a dict **only** for ESPN ids that have a gsis counterpart.
+    """
+    espn_ids = {pid for pid in ids if pid.startswith("espn:")}
+    if not espn_ids:
+        return {}
+
+    EspnPlayer = aliased(Player)
+    GsisPlayer = aliased(Player)
+
+    # 1. Exact name match on same team (or where one team is null)
+    rows = session.execute(
+        select(EspnPlayer.id, GsisPlayer.id)
+        .where(
+            EspnPlayer.id.in_(espn_ids),
+            GsisPlayer.name == EspnPlayer.name,
+            (GsisPlayer.team == EspnPlayer.team) | GsisPlayer.team.is_(None) | EspnPlayer.team.is_(None),
+            ~GsisPlayer.id.startswith("espn:"),
+        )
+    ).all()
+    mapping: dict[str, str] = {espn_id: gsis_id for espn_id, gsis_id in rows}
+
+    # 2. For any remaining ESPN ids, attempt normalized name matching
+    unresolved = espn_ids - set(mapping)
+    if unresolved:
+        unresolved_players = session.execute(
+            select(Player.id, Player.name, Player.team)
+            .where(Player.id.in_(unresolved))
+        ).all()
+        teams = {p.team for p in unresolved_players if p.team}
+        gsis_query = select(Player.id, Player.name, Player.team).where(~Player.id.startswith("espn:"))
+        if teams:
+            gsis_query = gsis_query.where((Player.team.in_(teams)) | Player.team.is_(None))
+        gsis_cands = session.execute(gsis_query).all()
+
+        norm_to_gsis: dict[tuple[str, str | None], str] = {}
+        for g in gsis_cands:
+            norm_to_gsis[(_norm_name(g.name), g.team)] = g.id
+            if g.team:
+                norm_to_gsis[(_norm_name(g.name), None)] = g.id
+
+        for ep in unresolved_players:
+            nname = _norm_name(ep.name)
+            gid = norm_to_gsis.get((nname, ep.team)) or norm_to_gsis.get((nname, None))
+            if gid:
+                mapping[ep.id] = gid
+
+    return mapping
+
+
 def _resolve_names(session: Session, ids: set[str]) -> dict[str, Row]:
     ids = {i for i in ids if i}
     if not ids:
@@ -188,25 +289,67 @@ def _resolve_names(session: Session, ids: set[str]) -> dict[str, Row]:
 
 
 def _name_to_id(session: Session, team: str, names: set[str]) -> dict[str, str]:
-    """Best-effort snap_counts name -> gsis id. Unmatched names stay unmatched."""
+    """Best-effort snap_counts name -> gsis id. Unmatched names stay unmatched.
+
+    When a name resolves to both a gsis id and an ``espn:`` id, the gsis id is
+    preferred so that snap data joins cleanly against the canonicalised play
+    ids. Supports normalized name matching for suffixes (e.g. 'Jr.', 'III').
+    """
     if not names:
         return {}
-    return dict(session.execute(
+    all_team_players = session.execute(
         select(Player.name, Player.id)
-        .where(Player.team == team, Player.name.in_(names))
-    ).all())
+        .where(Player.team == team)
+    ).all()
+
+    exact_map: dict[str, str] = {}
+    norm_map: dict[str, str] = {}
+    for name, pid in all_team_players:
+        if name not in exact_map or exact_map[name].startswith("espn:"):
+            exact_map[name] = pid
+        n = _norm_name(name)
+        if n not in norm_map or norm_map[n].startswith("espn:"):
+            norm_map[n] = pid
+
+    out: dict[str, str] = {}
+    for name in names:
+        if name in exact_map:
+            out[name] = exact_map[name]
+        else:
+            n = _norm_name(name)
+            if n in norm_map:
+                out[name] = norm_map[n]
+    return out
 
 
 def team_usage(session: Session, team: str, season: int, phase: str) -> dict:
     plays = _play_usage(session, team, season, phase)
     snaps = _snap_usage(session, team, season, phase)
 
+    # Build an espn:XXXXX → gsis-id map so the same physical player is counted
+    # once regardless of which source the play came from.
+    raw_ids: set[str] = set()
+    for _, pid, _ in plays["targets"]:
+        raw_ids.add(pid)
+    for _, pid, _ in plays["carries"]:
+        raw_ids.add(pid)
+    canon = _espn_to_gsis(session, raw_ids)   # only ESPN ids that resolved
+    def _c(pid: str) -> str:
+        """Return the canonical (gsis) id for *pid*."""
+        return canon.get(pid, pid)
+
     tgt: dict[str, dict[int, tuple[int, int]]] = defaultdict(dict)
     for week, pid, n in plays["targets"]:
-        tgt[pid][week] = (n, plays["team_pass"].get(week, 0))
+        cpid = _c(pid)
+        prev = tgt[cpid].get(week, (0, 0))
+        # Counts from both source ids are additive; the denominator (team pass
+        # plays) is the same for the week so take the max rather than summing.
+        tgt[cpid][week] = (prev[0] + n, max(prev[1], plays["team_pass"].get(week, 0)))
     car: dict[str, dict[int, tuple[int, int]]] = defaultdict(dict)
     for week, pid, n in plays["carries"]:
-        car[pid][week] = (n, plays["team_run"].get(week, 0))
+        cpid = _c(pid)
+        prev = car[cpid].get(week, (0, 0))
+        car[cpid][week] = (prev[0] + n, max(prev[1], plays["team_run"].get(week, 0)))
 
     snap_weekly: dict[str, dict[int, tuple[int, int]]] = defaultdict(dict)
     snap_meta: dict[str, dict] = {}
@@ -225,13 +368,22 @@ def team_usage(session: Session, team: str, season: int, phase: str) -> dict:
     season_pass = sum(plays["team_pass"].values())
     season_run = sum(plays["team_run"].values())
 
+    # Merge route_mix and targets_by_player through the same canonical mapping.
+    merged_route_mix: dict[str, Counter] = defaultdict(Counter)
+    for pid, ctr in plays["route_mix"].items():
+        merged_route_mix[_c(pid)] += ctr
+    merged_targets_by_player: dict[str, int] = defaultdict(int)
+    for pid, n in plays["targets_by_player"].items():
+        merged_targets_by_player[_c(pid)] += n
+
     players = []
     for pid in ids:
         p = people.get(pid)
         t_total = sum(v[0] for v in tgt.get(pid, {}).values())
         c_total = sum(v[0] for v in car.get(pid, {}).values())
         snap_name = id_to_snapname.get(pid)
-        mix = plays["route_mix"].get(pid, Counter())
+        mix = merged_route_mix.get(pid, Counter())
+        tbp = merged_targets_by_player.get(pid, 0)
         players.append({
             "player_id": pid,
             "name": p.name if p else pid,
@@ -255,9 +407,8 @@ def team_usage(session: Session, team: str, season: int, phase: str) -> dict:
             "route_mix": {
                 "mix": rate_table(mix)[:10],
                 "n": sum(mix.values()),
-                "coverage": (round(sum(mix.values())
-                                   / plays["targets_by_player"].get(pid, 1), 3)
-                             if plays["targets_by_player"].get(pid) else None),
+                "coverage": (round(sum(mix.values()) / max(1, tbp), 3)
+                             if tbp else None),
             },
         })
 

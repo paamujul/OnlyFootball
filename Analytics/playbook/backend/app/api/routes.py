@@ -12,6 +12,7 @@ from app.analytics.compare import compare_teams
 from app.analytics.defense_personnel import team_defense_personnel
 from app.analytics.defense_profile import defense_profile
 from app.analytics.drives import SCRIPT_LENGTH, team_drives
+from app.analytics.heatmap import matchup_heatmap, team_field_heatmap, upcoming_matchups
 from app.analytics.lineup_impact import lineup_impact, roster_for_side
 from app.analytics.playbook import (play_caller_for, play_caller_playbook,
                                     team_playbook)
@@ -119,6 +120,33 @@ def compare(response: Response, teamA: str, teamB: str, season: int, phase: str,
             db: Session = Depends(get_db)):
     response.headers["Cache-Control"] = f"public, max-age={CACHE_SECONDS}"
     return compare_teams(db, teamA.upper(), teamB.upper(), season, phase)
+
+
+# --- heatmap views --------------------------------------------------------
+
+@router.get("/heatmap/upcoming")
+def heatmap_upcoming(response: Response, season: int, phase: str,
+                     db: Session = Depends(get_db)):
+    """Upcoming matchups and full team directory for matchup heatmaps."""
+    response.headers["Cache-Control"] = f"public, max-age={CACHE_SECONDS}"
+    return upcoming_matchups(db, season, phase)
+
+
+@router.get("/heatmap/matchup")
+def heatmap_matchup(response: Response, teamA: str, teamB: str, season: int,
+                    phase: str, games: int = 4,
+                    db: Session = Depends(get_db)):
+    """Dual-direction offense vs defense field heatmap overlays."""
+    response.headers["Cache-Control"] = f"public, max-age={CACHE_SECONDS}"
+    return matchup_heatmap(db, teamA.upper(), teamB.upper(), season, phase, last_n_games=games)
+
+
+@router.get("/heatmap/team")
+def heatmap_team(response: Response, team: str, season: int, phase: str,
+                 games: int = 4, db: Session = Depends(get_db)):
+    """Single-team offense and defense passing & rushing field heatmaps."""
+    response.headers["Cache-Control"] = f"public, max-age={CACHE_SECONDS}"
+    return team_field_heatmap(db, team.upper(), season, phase, last_n_games=games)
 
 
 # --- coaching views -------------------------------------------------------
