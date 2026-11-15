@@ -1,0 +1,156 @@
+name: Playbook CI/CD
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "Analytics/playbook/**"
+      - ".github/workflows/ci-cd.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "Analytics/playbook/**"
+      - ".github/workflows/ci-cd.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test-backend:
+    name: Backend Tests & Migrations
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: nfl_analytics_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    defaults:
+      run:
+        working-directory: Analytics/playbook/backend
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: Analytics/playbook/backend/requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Verify database migrations on PostgreSQL
+        env:
+          DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/nfl_analytics_test
+        run: alembic upgrade head
+
+      - name: Run pytest suite (SQLite and PostgreSQL)
+        env:
+          TEST_DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/nfl_analytics_test
+        run: pytest -q
+
+  test-frontend:
+    name: Frontend Lint & Build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: Analytics/playbook/frontend
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: Analytics/playbook/frontend/.nvmrc
+          cache: npm
+          cache-dependency-path: Analytics/playbook/frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run linter
+        run: npm run lint
+
+      - name: Type-check and build bundle
+        run: npm run build
+
+  deploy:
+    name: Deploy to Google Cloud Run
+    needs: [test-backend, test-frontend]
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: Analytics/playbook
+    env:
+      GCP_REGION: ${{ secrets.GCP_REGION || 'us-central1' }}
+      SERVICE_NAME: ${{ secrets.CLOUD_RUN_SERVICE || 'playbook' }}
+      REPO_NAME: ${{ secrets.ARTIFACT_REGISTRY_REPO || 'playbook' }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Verify GCP credentials secret
+        id: check-auth
+        run: |
+          if [ -z "${{ secrets.GCP_SA_KEY }}" ] && [ -z "${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}" ]; then
+            echo "::error::Neither GCP_SA_KEY nor GCP_WORKLOAD_IDENTITY_PROVIDER is set in repository secrets."
+            echo "::notice::See Analytics/playbook/deploy/README.md for setup instructions."
+            exit 1
+          fi
+
+      - name: Authenticate to Google Cloud (Service Account Key)
+        if: env.GCP_SA_KEY != ''
+        uses: google-github-actions/auth@v2
+        env:
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Authenticate to Google Cloud (Workload Identity)
+        if: env.GCP_WORKLOAD_IDENTITY_PROVIDER != '' && env.GCP_SA_KEY == ''
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker authentication for Artifact Registry
+        run: |
+          gcloud auth configure-docker ${{ env.GCP_REGION }}-docker.pkg.dev --quiet
+
+      - name: Build and push container image
+        env:
+          IMAGE_TAG: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.REPO_NAME }}/app:${{ github.sha }}
+          LATEST_TAG: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.REPO_NAME }}/app:latest
+        run: |
+          docker build -f backend/Dockerfile -t "${IMAGE_TAG}" -t "${LATEST_TAG}" .
+          docker push "${IMAGE_TAG}"
+          docker push "${LATEST_TAG}"
+
+      - name: Deploy to Cloud Run
+        uses: google-github-actions/deploy-cloudrun@v2
+        with:
+          service: ${{ env.SERVICE_NAME }}
+          image: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.REPO_NAME }}/app:${{ github.sha }}
+          region: ${{ env.GCP_REGION }}
+          flags: |
+            --allow-unauthenticated
+            --no-cpu-throttling
+
