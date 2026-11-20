@@ -26,6 +26,8 @@ Requires `gcloud` (authenticated: `gcloud auth login`) and `openssl`.
 PROJECT_ID=<your-project-id> REGION=us-central1 ./Analytics/playbook/deploy/gcp-setup.sh
 ```
 
+Run it from a trusted single-user machine or Cloud Shell: `gcloud sql users create --password` briefly exposes the DB password in the process list (`ps`).
+
 It is safe to re-run. It enables APIs, creates the Artifact Registry repo, both
 service accounts and their roles, the Cloud SQL instance/database/user, and the
 `playbook-database-url` secret (random password, never printed). If the secret
@@ -81,13 +83,7 @@ export RUNTIME_SA=playbook-runtime@$PROJECT_ID.iam.gserviceaccount.com
 export SQL=$PROJECT_ID:$REGION:playbook-db
 ```
 
-The workflow tags images by commit SHA. If `:latest` does not exist yet, push it
-once (or substitute a SHA tag from Artifact Registry):
-
-```bash
-gcloud artifacts docker tags add \
-  $REGION-docker.pkg.dev/$PROJECT_ID/playbook/app:<GIT_SHA> $IMAGE
-```
+The workflow pushes both `:<sha>` and `:latest` tags, so the job commands below use `:latest`.
 
 ## 4. Seed job (run once)
 
