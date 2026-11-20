@@ -52,6 +52,12 @@ ENV DATA_DIR=/app/data
 # non-root user can read it.
 COPY --from=web /web/dist ./static
 
+# Trained play-call models (playcall_presnap, playcall_situation: <version>.txt/
+# .json plus a `latest` pointer), tracked in git. Cloud Run's filesystem is
+# ephemeral, so without baking them in /api/coach/predict has no model to load.
+# Copied before the chown below so the non-root user owns them.
+COPY backend/storage/models ./storage/models
+
 # app.config mkdirs BOTH STORAGE_DIR and CACHE_DIR at import time (config.py
 # lines 10-11), before anything gets a chance to handle the error. If either is
 # missing and its parent is not writable by the running user, `import
