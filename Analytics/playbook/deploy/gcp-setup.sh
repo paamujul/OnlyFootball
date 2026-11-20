@@ -55,7 +55,6 @@ ensure_sa "$RUNTIME_SA_NAME" "Playbook Cloud Run runtime"
 log "Deployer IAM roles"
 bind_project "$DEPLOYER_SA" roles/artifactregistry.writer
 bind_project "$DEPLOYER_SA" roles/run.admin
-bind_project "$DEPLOYER_SA" roles/cloudsql.client
 # Scoped to the runtime SA only (not project-wide).
 "${G[@]}" iam service-accounts add-iam-policy-binding "$RUNTIME_SA" \
   --member "serviceAccount:$DEPLOYER_SA" --role roles/iam.serviceAccountUser >/dev/null

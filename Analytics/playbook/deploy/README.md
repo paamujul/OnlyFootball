@@ -37,7 +37,7 @@ Roles granted:
 
 | Account | Roles |
 | :--- | :--- |
-| `github-actions-deployer` | `artifactregistry.writer`, `run.admin`, `cloudsql.client`, `iam.serviceAccountUser` (on `playbook-runtime` only) |
+| `github-actions-deployer` | `artifactregistry.writer`, `run.admin`, `iam.serviceAccountUser` (on `playbook-runtime` only) |
 | `playbook-runtime` | `cloudsql.client`, `secretmanager.secretAccessor` (on the secret only) |
 
 ## 2. GitHub secrets
@@ -53,15 +53,18 @@ rm -f sa-key.json
 ```
 
 Option B: Workload Identity Federation (no long-lived key): set
-`GCP_WORKLOAD_IDENTITY_PROVIDER` (and, if the workflow requires it, the
-service account) instead of `GCP_SA_KEY`.
+`GCP_WORKLOAD_IDENTITY_PROVIDER` (full provider resource name) and
+`GCP_SERVICE_ACCOUNT` (the deployer service account email) instead of `GCP_SA_KEY`.
+The deploy job already requests `id-token: write`.
 
 **Settings > Secrets and variables > Actions**:
 
 | Secret | Value |
 | :--- | :--- |
 | `GCP_PROJECT_ID` | your project ID (required) |
-| `GCP_SA_KEY` | deployer key JSON (or use the Workload Identity pair) |
+| `GCP_SA_KEY` | deployer key JSON (Option A) |
+| `GCP_WORKLOAD_IDENTITY_PROVIDER` | Option B: provider resource name |
+| `GCP_SERVICE_ACCOUNT` | Option B: deployer service account email |
 | `GCP_REGION` | optional, default `us-central1` |
 | `CLOUD_RUN_SERVICE` | optional, default `playbook` |
 | `ARTIFACT_REGISTRY_REPO` | optional, default `playbook` |
@@ -98,6 +101,10 @@ gcloud run jobs deploy playbook-seed \
 
 gcloud run jobs execute playbook-seed --region $REGION --project $PROJECT_ID --wait
 ```
+
+The seed job exits 0 even if individual downloads fail (failures are recorded in
+`sync_log`). After it finishes, confirm data actually loaded:
+`curl -fsS "$URL/api/status"` (`$URL` as in step 7) (or inspect `sync_log`), not just the job result.
 
 ## 5. Daily refresh job + Cloud Scheduler
 
@@ -139,19 +146,25 @@ gcloud run jobs deploy playbook-train \
 gcloud run jobs execute playbook-train --region $REGION --project $PROJECT_ID --wait
 ```
 
-Run it manually whenever you want to retrain; models are not committed to the image.
+Run it manually whenever you want to retrain; models ship inside the image (baked from `backend/storage/models`). The train
+job writes to `STORAGE_DIR/models` on the job's ephemeral filesystem, so its output
+is lost when the job ends: treat it as a validation/report run only. To ship a
+retrained model: run `python -m app.cli train 2025` locally (or copy the artifacts
+from the job), commit the new files under `backend/storage/models`, and push to
+`main` so the image is rebuilt and redeployed.
 
 ## 7. Verify
 
 ```bash
 URL=$(gcloud run services describe playbook --region $REGION --project $PROJECT_ID --format='value(status.url)')
-curl -fsS "$URL/api/health"          # expect a healthy response
+curl -fsS "$URL/api/"                # expect {"app": "nfl-analytics", ...}
 gcloud run jobs executions list --job playbook-migrate --region $REGION --project $PROJECT_ID
 gcloud run services logs read playbook --region $REGION --project $PROJECT_ID --limit 50
 ```
 
-Open `$URL` in a browser and confirm teams/games load after the seed job. If the
-health path differs, check `backend/app` for the actual route.
+Open `$URL` in a browser and confirm teams/games load after the seed job.
+`/api/health` can return 503 briefly after the first deploy, until the first
+successful sync is recorded; this is expected and is why it is not used as a probe.
 
 ## Health probes
 
@@ -173,7 +186,7 @@ Images are kept under `:<sha>` tags in Artifact Registry, so every revision stay
 ```bash
 gcloud run revisions list --service playbook --region $REGION --project $PROJECT_ID
 gcloud run services update-traffic playbook \
-  --to-revisions=<REVISION>=100 --region us-central1 --project $PROJECT_ID
+  --to-revisions=<REVISION>=100 --region $REGION --project $PROJECT_ID
 ```
 
 Rule: migrations run before the new revision deploys, so every migration must be
