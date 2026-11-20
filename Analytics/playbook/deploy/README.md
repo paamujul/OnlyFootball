@@ -153,6 +153,42 @@ gcloud run services logs read playbook --region $REGION --project $PROJECT_ID --
 Open `$URL` in a browser and confirm teams/games load after the seed job. If the
 health path differs, check `backend/app` for the actual route.
 
+## Health probes
+
+The workflow sets (verified against `gcloud run deploy --help`, gcloud 564.0.0, GA flags):
+
+- `--port=8080`: Cloud Run sends traffic to 8080 and injects `PORT=8080`; the
+  image `CMD` uses `${PORT:-8600}`, so it listens on 8080 on Cloud Run (8600 only locally).
+- Startup probe `GET /api/` every 5s, 30 failures allowed (~150s to start).
+- Liveness probe `GET /api/` every 30s, 3 failures to restart.
+
+`/api/` only proves the process is serving. Do **not** probe `/api/health`: it
+returns 503 when the last successful sync is more than 6 hours old (always true
+for a fresh or empty database) and would crash-loop the service.
+
+## Rollback
+
+Images are kept under `:<sha>` tags in Artifact Registry, so every revision stays deployable.
+
+```bash
+gcloud run revisions list --service playbook --region $REGION --project $PROJECT_ID
+gcloud run services update-traffic playbook \
+  --to-revisions=<REVISION>=100 --region us-central1 --project $PROJECT_ID
+```
+
+Rule: migrations run before the new revision deploys, so every migration must be
+backward-compatible with the previous revision (add columns/tables, do not drop
+or rename in the same release). Otherwise a rollback will break on the new schema.
+Run `gcloud run services update-traffic playbook --to-latest` to return to the newest revision.
+
+## Production-readiness checklist
+
+- [ ] Secrets only in Secret Manager (`playbook-database-url`); none in the repo or image.
+- [ ] Exactly one instance (`min-instances=1`, `max-instances=1`) so the poller runs once.
+- [ ] Cloud SQL automated backups enabled.
+- [ ] Cloud Monitoring uptime check on `/api/health` for alerting only (not a probe).
+- [ ] Service is public by design (`--allow-unauthenticated`); the app has no auth.
+
 ## Cost
 
 Roughly **$30-50/month**: the always-on Cloud Run instance (min 1, no CPU

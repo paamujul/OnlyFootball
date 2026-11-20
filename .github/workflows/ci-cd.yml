@@ -181,4 +181,7 @@ jobs:
             --max-instances=1
             --memory=2Gi
             --cpu=1
+            --port=8080
+            --startup-probe=httpGet.path=/api/,httpGet.port=8080,periodSeconds=5,timeoutSeconds=3,failureThreshold=30
+            --liveness-probe=httpGet.path=/api/,httpGet.port=8080,periodSeconds=30,timeoutSeconds=5,failureThreshold=3
 
