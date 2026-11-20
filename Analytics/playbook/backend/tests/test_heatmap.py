@@ -10,7 +10,7 @@ from app.analytics.heatmap import (
     team_field_heatmap,
     upcoming_matchups,
 )
-from app.db.models import Base, Game, Play, Team
+from app.db.models import Base, Game, Play, Player, Team
 
 
 @pytest.fixture
@@ -48,7 +48,19 @@ def test_db():
                   play_type="run", run_location="middle", run_gap="guard",
                   yards_gained=2.0, touchdown=False, epa=-0.20, success=False)
 
-        session.add_all([p1, p2, p3, p4])
+        # Extra left-tackle carries by two rushers to exercise per-rusher aggregation
+        p5 = Play(game_id="2026_01_MIA_DET", play_id=5, posteam="MIA", defteam="DET",
+                  play_type="run", run_location="left", run_gap="tackle", rusher_id="r1",
+                  yards_gained=6.0, touchdown=False, epa=0.20, success=True)
+        p6 = Play(game_id="2026_01_MIA_DET", play_id=6, posteam="MIA", defteam="DET",
+                  play_type="run", run_location="left", run_gap="tackle", rusher_id="r1",
+                  yards_gained=-2.0, touchdown=False, epa=-0.40, success=False)
+        p7 = Play(game_id="2026_01_MIA_DET", play_id=7, posteam="MIA", defteam="DET",
+                  play_type="run", run_location="left", run_gap="tackle", rusher_id="r2",
+                  yards_gained=3.0, touchdown=False, epa=0.0, success=False)
+
+        session.add_all([Player(id="r1", name="Ace Runner"), Player(id="r2", name="Bo Back")])
+        session.add_all([p1, p2, p3, p4, p5, p6, p7])
         session.commit()
         yield session
 
@@ -102,8 +114,26 @@ def test_team_field_heatmap(test_db):
     gaps = data["offense"]["rushing"]["gaps"]
     assert len(gaps) == 7
     left_tackle = next(g for g in gaps if g["gap_key"] == "left tackle")
-    assert left_tackle["carries"] == 1
+    assert left_tackle["carries"] == 4
     assert left_tackle["touchdowns"] == 1
+
+
+def test_run_gap_top_rushers(test_db):
+    data = team_field_heatmap(test_db, "MIA", 2026, "reg", last_n_games=4)
+    gaps = data["offense"]["rushing"]["gaps"]
+    left_tackle = next(g for g in gaps if g["gap_key"] == "left tackle")
+    rushers = left_tackle["top_rushers"]
+    # Sorted by carries desc; unknown-rusher plays are skipped
+    assert [r["name"] for r in rushers] == ["Ace Runner", "Bo Back"]
+    ace = rushers[0]
+    assert ace["carries"] == 2
+    assert ace["yards"] == 4.0
+    assert ace["ypc"] == 2.0
+    assert ace["touchdowns"] == 0
+    assert ace["epa_avg"] == -0.1
+    # Gaps with no carries expose an empty list
+    empty = next(g for g in gaps if g["gap_key"] == "right end")
+    assert empty["top_rushers"] == []
 
 
 def test_matchup_heatmap(test_db):

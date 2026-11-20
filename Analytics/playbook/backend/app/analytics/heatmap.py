@@ -138,13 +138,13 @@ def team_field_heatmap(session: Session, team: str, season: int, phase: str, las
     # Process Offense
     off_pass_zones = _aggregate_pass_zones(off_plays, is_defense=False, player_names=player_names)
     off_pass_vectors = _build_pass_vectors(off_plays, player_names)
-    off_run_gaps = _aggregate_run_gaps(off_plays, is_defense=False)
+    off_run_gaps = _aggregate_run_gaps(off_plays, is_defense=False, player_names=player_names)
     off_run_vectors = _build_run_vectors(off_plays, player_names)
 
     # Process Defense
     def_pass_zones = _aggregate_pass_zones(def_plays, is_defense=True, player_names=player_names)
     def_pass_vectors = _build_pass_vectors(def_plays, player_names)
-    def_run_gaps = _aggregate_run_gaps(def_plays, is_defense=True)
+    def_run_gaps = _aggregate_run_gaps(def_plays, is_defense=True, player_names=player_names)
     def_run_vectors = _build_run_vectors(def_plays, player_names)
 
     return {
@@ -313,7 +313,46 @@ def _build_pass_vectors(plays: list[Play], player_names: dict[str, str], max_pla
     return vectors
 
 
-def _aggregate_run_gaps(plays: list[Play], is_defense: bool) -> list[dict[str, Any]]:
+def _gap_rusher_leaders(plays: list[Play], player_names: dict[str, str],
+                        top_n: int = 5) -> list[dict[str, Any]]:
+    """Per-rusher stats for a single run gap, sorted by carries desc.
+
+    Merges entries sharing a resolved name (dual ESPN/GSIS ids). Plays with no
+    rusher id are skipped.
+    """
+    stats: dict[str, dict[str, Any]] = {}
+    for p in plays:
+        rid = p.rusher_id or ""
+        if not rid:
+            continue
+        name = player_names.get(rid, rid)
+        s = stats.setdefault(name.lower().strip(), {
+            "player_id": rid, "name": name, "carries": 0, "yards": 0.0,
+            "touchdowns": 0, "epa_sum": 0.0, "epa_count": 0,
+        })
+        s["carries"] += 1
+        s["yards"] += p.yards_gained or 0.0
+        if p.touchdown:
+            s["touchdowns"] += 1
+        if p.epa is not None:
+            s["epa_sum"] += p.epa
+            s["epa_count"] += 1
+
+    leaders = [{
+        "player_id": s["player_id"],
+        "name": s["name"],
+        "carries": s["carries"],
+        "yards": round(s["yards"], 1),
+        "ypc": round(s["yards"] / s["carries"], 1),
+        "touchdowns": s["touchdowns"],
+        "epa_avg": round(s["epa_sum"] / s["epa_count"], 3) if s["epa_count"] else 0.0,
+    } for s in stats.values()]
+    leaders.sort(key=lambda r: (-r["carries"], -r["epa_avg"]))
+    return leaders[:top_n]
+
+
+def _aggregate_run_gaps(plays: list[Play], is_defense: bool,
+                        player_names: dict[str, str] | None = None) -> list[dict[str, Any]]:
     grouped: dict[str, list[Play]] = {gap_key: [] for gap_key, _, _, _ in RUN_GAPS}
     for p in plays:
         if p.play_type == "run":
@@ -351,6 +390,7 @@ def _aggregate_run_gaps(plays: list[Play], is_defense: bool) -> list[dict[str, A
             "tfls": tfls,
             "epa_avg": avg_epa,
             "success_rate": succ_rate,
+            "top_rushers": _gap_rusher_leaders(plist, player_names or {}),
         })
     return results
 

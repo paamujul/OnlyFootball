@@ -396,6 +396,16 @@ export interface HeatmapPassVector {
   desc: string | null;
 }
 
+export interface HeatmapRushStat {
+  player_id: string;
+  name: string;
+  carries: number;
+  yards: number;
+  ypc: number;
+  touchdowns: number;
+  epa_avg: number;
+}
+
 export interface HeatmapRunGap {
   gap_key: string;
   location: string;
@@ -408,6 +418,7 @@ export interface HeatmapRunGap {
   tfls: number;
   epa_avg: number;
   success_rate: number;
+  top_rushers: HeatmapRushStat[];
 }
 
 export interface HeatmapRunVector {

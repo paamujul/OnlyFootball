@@ -1,5 +1,7 @@
 import { useState, useMemo, useRef, useEffect } from 'react';
 import type {
+  HeatmapRushStat,
+  HeatmapRunVector,
   MatchupOverlayGap,
   MatchupOverlayMap,
   MatchupOverlayZone,
@@ -53,6 +55,72 @@ function gapX(gapKey: string, i: number): number {
   const conf = GAP_CONFIG[gapKey] ?? GAP_CONFIG['middle'];
   const jitter = ((i * 37) % 100) / 100 - 0.5;
   return conf.x + conf.w / 2 + jitter * (conf.w - 18);
+}
+
+// Gap "heat" bands run from the line of scrimmage up to the top of the field
+const GAP_BAND_Y = depthY(45);
+const GAP_BAND_H = LOS_Y + 15 - GAP_BAND_Y;
+const BAND_BASE_OPACITY = 0.12;
+const BAND_FOCUS_OPACITY = 0.24;
+
+function signed(v: number, digits = 2): string {
+  return v > 0 ? `+${v.toFixed(digits)}` : v.toFixed(digits);
+}
+
+// Rushing trail opacity: every carry is visible; a focused gap emphasises its own carries.
+function runTrailOpacity(r: HeatmapRunVector, focusGap: string | null): number {
+  if (focusGap) {
+    if (r.gap_key === focusGap) return 0.9;
+    return r.touchdown ? 0.4 : 0.1;
+  }
+  return r.touchdown ? 0.8 : 0.55;
+}
+
+const RUSH_TH: React.CSSProperties = {
+  padding: '3px 6px',
+  fontWeight: 700,
+  color: 'var(--muted)',
+  textTransform: 'uppercase',
+  fontSize: 9,
+  letterSpacing: '0.04em',
+  textAlign: 'right',
+};
+
+// Carrier / Attempted / YDS / Y/A / TD / EPA/T table shown when hovering a gap
+function RushersTable({ rushers, emptyText }: { rushers: HeatmapRushStat[]; emptyText: string }) {
+  if (rushers.length === 0) {
+    return <div style={{ color: 'var(--muted)', padding: '4px 0' }}>{emptyText}</div>;
+  }
+  return (
+    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 10.5 }}>
+      <thead>
+        <tr style={{ borderBottom: '1px solid var(--grid)' }}>
+          <th style={{ ...RUSH_TH, textAlign: 'left' }}>Carrier</th>
+          <th style={RUSH_TH}>Attempted</th>
+          <th style={RUSH_TH}>YDS</th>
+          <th style={RUSH_TH}>Y/A</th>
+          <th style={RUSH_TH}>TD</th>
+          <th style={RUSH_TH}>EPA/T</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rushers.map((r) => (
+          <tr key={r.player_id} style={{ borderBottom: '1px solid var(--grid)' }}>
+            <td style={{ padding: '3px 6px', fontWeight: 700, color: 'var(--ink)', whiteSpace: 'nowrap' }}>{r.name}</td>
+            <td style={{ padding: '3px 6px', textAlign: 'right' }}>{r.carries}</td>
+            <td style={{ padding: '3px 6px', textAlign: 'right' }}>{r.yards}</td>
+            <td style={{ padding: '3px 6px', textAlign: 'right' }}>{r.ypc.toFixed(1)}</td>
+            <td style={{ padding: '3px 6px', textAlign: 'right', fontWeight: r.touchdowns > 0 ? 800 : 400 }}>
+              {r.touchdowns > 0 ? r.touchdowns : '-'}
+            </td>
+            <td style={{ padding: '3px 6px', textAlign: 'right', color: r.epa_avg >= 0.1 ? 'var(--good)' : r.epa_avg <= -0.1 ? 'var(--bad)' : 'var(--ink-2)' }}>
+              {signed(r.epa_avg)}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
 }
 
 // Color and opacity helper for favorability
@@ -116,6 +184,11 @@ interface TooltipData {
   defenseLines: string[];
   topReceiver?: string;
   hint: string;
+  // Rushing view: carrier table replaces the offense/defense summary lines
+  rushers?: HeatmapRushStat[];
+  rushersHeader?: string;
+  // Container height captured at hover time, used to keep the tooltip inside the card
+  boundsH?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -203,7 +276,7 @@ export function MatchupFieldHeatmap({
     if (!rect) return;
     const rawX = e.clientX - rect.left;
     const rawY = e.clientY - rect.top;
-    setTooltip((prev) => (prev ? { ...prev, x: rawX, y: rawY } : null));
+    setTooltip((prev) => (prev ? { ...prev, x: rawX, y: rawY, boundsH: rect.height } : null));
   };
 
   const handleZoneMouseEnter = (e: React.MouseEvent, z: MatchupOverlayZone) => {
@@ -266,6 +339,26 @@ export function MatchupFieldHeatmap({
     const x = rect ? e.clientX - rect.left : 200;
     const y = rect ? e.clientY - rect.top : 260;
     const isSmall = g.offense.carries < 8;
+
+    if (view === 'run') {
+      setTooltip({
+        x,
+        y,
+        title: `${conf.fullName} (${conf.abbr})`,
+        subtitle: `${data.offense_team.abbr} Rushing vs ${data.defense_team.abbr} Run Defense`,
+        edge: g.advantage.score,
+        tier: g.advantage.tier,
+        isSmallSample: false,
+        offenseHeader: '',
+        offenseLines: [],
+        defenseHeader: '',
+        defenseLines: [],
+        rushers: g.offense.top_rushers ?? [],
+        rushersHeader: `${data.offense_team.abbr} rushers, last ${data.offense_sample_games.length} games`,
+        hint: 'Click gap to lock view and show run breakdown',
+      });
+      return;
+    }
 
     setTooltip({
       x,
@@ -549,6 +642,18 @@ export function MatchupFieldHeatmap({
                   onFocus={(e) => handleGapMouseEnter(e as any, g)}
                   onBlur={handleGapMouseLeave}
                 >
+                  {/* Low-opacity heat band for the whole gap lane (rushing view) */}
+                  {view === 'run' && (
+                    <rect
+                      x={conf.x}
+                      y={GAP_BAND_Y}
+                      width={conf.w}
+                      height={GAP_BAND_H}
+                      rx={6}
+                      fill={style.fill}
+                      opacity={isSelected || isHovered ? BAND_FOCUS_OPACITY : BAND_BASE_OPACITY}
+                    />
+                  )}
                   <rect
                     x={conf.x}
                     y={yStart}
@@ -590,23 +695,25 @@ export function MatchupFieldHeatmap({
                     {conf.abbr}
                   </text>
 
-                  {/* Signed Edge */}
-                  <text
-                    x={conf.x + conf.w / 2}
-                    y={LOS_Y + 9}
-                    textAnchor="middle"
-                    fontSize={9}
-                    fontWeight={700}
-                    fill={style.textColor}
-                  >
-                    {g.advantage.score > 0 ? `+${g.advantage.score.toFixed(2)}` : g.advantage.score.toFixed(2)}
-                  </text>
+                  {/* Signed Edge (hidden in rushing view: carry trails and the hover table replace it) */}
+                  {view !== 'run' && (
+                    <text
+                      x={conf.x + conf.w / 2}
+                      y={LOS_Y + 9}
+                      textAnchor="middle"
+                      fontSize={9}
+                      fontWeight={700}
+                      fill={style.textColor}
+                    >
+                      {g.advantage.score > 0 ? `+${g.advantage.score.toFixed(2)}` : g.advantage.score.toFixed(2)}
+                    </text>
+                  )}
                 </g>
               );
             })}
 
-          {/* PASS PLAY VECTORS (Faint background texture by default, focused on hover/click) */}
-          {showVectors && (view === 'both' || view === 'pass') &&
+          {/* PASS PLAY VECTORS (passing view only; "Pass & Run" shows positions + edge only) */}
+          {showVectors && view === 'pass' &&
             passPlays.map((p, i) => {
               const x = laneX(p.location, i);
               const yTarget = depthY(p.depth);
@@ -698,26 +805,19 @@ export function MatchupFieldHeatmap({
               );
             })}
 
-          {/* RUN PLAY VECTORS (Hidden by default in the strip; revealed on gap hover/click) */}
-          {showVectors && (view === 'both' || view === 'run') &&
+          {/* RUN PLAY VECTORS (rushing view only: every carry is drawn automatically) */}
+          {showVectors && view === 'run' &&
             runPlays.map((r, i) => {
               const x = gapX(r.gap_key, i);
               const yBackfield = LOS_Y + 16;
               const yEnd = depthY(r.yards);
               const isTfl = r.yards < 0;
 
-              const isThisGapFocused = effectiveFocusGap ? r.gap_key === effectiveFocusGap : false;
-
-              // Hide run dots by default; reveal when gap is focused
-              if (!isThisGapFocused && !r.touchdown) {
-                return null;
-              }
-
-              const color = r.touchdown ? 'var(--series-2)' : isTfl ? '#ef4444' : 'var(--series-3)';
-              const opacity = isThisGapFocused ? 0.85 : 0.65;
+              const color = r.touchdown ? '#dc2626' : isTfl ? '#ef4444' : 'var(--series-3)';
+              const opacity = runTrailOpacity(r, effectiveFocusGap ?? null);
 
               return (
-                <g key={`r-${r.play_id}`} opacity={opacity}>
+                <g key={`r-${r.play_id}`} opacity={opacity} pointerEvents="none">
                   <line
                     x1={x}
                     y1={yBackfield}
@@ -735,6 +835,9 @@ export function MatchupFieldHeatmap({
                     stroke="var(--surface)"
                     strokeWidth={1.2}
                   />
+                  {r.touchdown && (
+                    <text x={x} y={yEnd - 7} textAnchor="middle" fontSize={8.5} fontWeight={800} fill="#dc2626">TD</text>
+                  )}
                 </g>
               );
             })}
@@ -757,9 +860,9 @@ export function MatchupFieldHeatmap({
           <div
             style={{
               position: 'absolute',
-              left: Math.min(W - 250, Math.max(10, tooltip.x + 12)),
-              top: Math.min(H - 180, Math.max(10, tooltip.y - 40)),
-              width: 250,
+              left: Math.min(W - (tooltip.rushers ? 330 : 250), Math.max(10, tooltip.x + 12)),
+              top: Math.max(10, Math.min(tooltip.y - 40, (tooltip.boundsH ?? H) - (tooltip.rushers ? 230 : 180))),
+              width: tooltip.rushers ? 330 : 250,
               padding: '10px 12px',
               background: 'var(--surface)',
               border: '1px solid var(--grid)',
@@ -784,25 +887,34 @@ export function MatchupFieldHeatmap({
               </span>
             </div>
 
-            {tooltip.isSmallSample && (
-              <div style={{ color: 'var(--series-4)', fontWeight: 700, fontSize: 10, marginBottom: 4 }}>
-                ⚠ {tooltip.sampleNote}
+            {tooltip.rushers ? (
+              <div style={{ borderTop: '1px solid var(--grid)', paddingTop: 5, marginTop: 4 }}>
+                <div style={{ fontWeight: 700, color: 'var(--ink)', marginBottom: 3 }}>{tooltip.rushersHeader}</div>
+                <RushersTable rushers={tooltip.rushers} emptyText="No carries in this gap" />
               </div>
+            ) : (
+              <>
+                {tooltip.isSmallSample && (
+                  <div style={{ color: 'var(--series-4)', fontWeight: 700, fontSize: 10, marginBottom: 4 }}>
+                    ⚠ {tooltip.sampleNote}
+                  </div>
+                )}
+
+                <div style={{ borderTop: '1px solid var(--grid)', paddingTop: 5, marginTop: 4 }}>
+                  <div style={{ fontWeight: 700, color: 'var(--ink)' }}>{tooltip.offenseHeader}</div>
+                  {tooltip.offenseLines.map((line, idx) => (
+                    <div key={idx} style={{ color: 'var(--ink-2)' }}>{line}</div>
+                  ))}
+                </div>
+
+                <div style={{ borderTop: '1px solid var(--grid)', paddingTop: 5, marginTop: 4 }}>
+                  <div style={{ fontWeight: 700, color: 'var(--muted)' }}>{tooltip.defenseHeader}</div>
+                  {tooltip.defenseLines.map((line, idx) => (
+                    <div key={idx} style={{ color: 'var(--muted)' }}>{line}</div>
+                  ))}
+                </div>
+              </>
             )}
-
-            <div style={{ borderTop: '1px solid var(--grid)', paddingTop: 5, marginTop: 4 }}>
-              <div style={{ fontWeight: 700, color: 'var(--ink)' }}>{tooltip.offenseHeader}</div>
-              {tooltip.offenseLines.map((line, idx) => (
-                <div key={idx} style={{ color: 'var(--ink-2)' }}>{line}</div>
-              ))}
-            </div>
-
-            <div style={{ borderTop: '1px solid var(--grid)', paddingTop: 5, marginTop: 4 }}>
-              <div style={{ fontWeight: 700, color: 'var(--muted)' }}>{tooltip.defenseHeader}</div>
-              {tooltip.defenseLines.map((line, idx) => (
-                <div key={idx} style={{ color: 'var(--muted)' }}>{line}</div>
-              ))}
-            </div>
 
             {tooltip.topReceiver && (
               <div style={{ borderTop: '1px solid var(--grid)', paddingTop: 5, marginTop: 4, fontWeight: 600, color: 'var(--series-1)' }}>
@@ -1017,6 +1129,16 @@ export function MatchupFieldHeatmap({
                   <div>Success Allowed: <strong>{Math.round(selectedGap.defense.success_rate * 100)}%</strong></div>
                 </div>
               </div>
+
+              <div style={{ marginTop: 14 }}>
+                <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 6 }}>
+                  {data.offense_team.abbr} rushers in {selectedGap.label}
+                  <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--muted)', marginLeft: 8 }}>
+                    last {data.offense_sample_games.length} games
+                  </span>
+                </div>
+                <RushersTable rushers={selectedGap.offense.top_rushers ?? []} emptyText="No carries in this gap" />
+              </div>
             </div>
           )}
         </div>
@@ -1041,6 +1163,8 @@ export function SingleTeamHeatmap({ data }: SingleTeamHeatmapProps) {
   const [hoveredGapKey, setHoveredGapKey] = useState<string | null>(null);
   const [selectedZoneKey, setSelectedZoneKey] = useState<string | null>(null);
   const [selectedGapKey, setSelectedGapKey] = useState<string | null>(null);
+  const [gapTip, setGapTip] = useState<{ x: number; y: number; gapKey: string; w: number; h: number } | null>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
 
   const activeUnit = side === 'offense' ? data.offense : data.defense;
   const maxZoneAtt = Math.max(1, ...activeUnit.passing.zones.map((z) => z.attempts));
@@ -1134,7 +1258,16 @@ export function SingleTeamHeatmap({ data }: SingleTeamHeatmapProps) {
       </div>
 
       {/* SVG Field */}
-      <div className="card" style={{ padding: '20px', maxWidth: 640, margin: '0 auto' }}>
+      <div
+        ref={cardRef}
+        className="card"
+        onMouseMove={(e) => {
+          const rect = cardRef.current?.getBoundingClientRect();
+          if (!rect) return;
+          setGapTip((prev) => (prev ? { ...prev, x: e.clientX - rect.left, y: e.clientY - rect.top, w: rect.width, h: rect.height } : null));
+        }}
+        style={{ padding: '20px', maxWidth: 640, margin: '0 auto', position: 'relative' }}
+      >
         <svg
           viewBox={`0 0 ${W} ${H}`}
           role="img"
@@ -1260,9 +1393,30 @@ export function SingleTeamHeatmap({ data }: SingleTeamHeatmapProps) {
                   aria-label={`${conf.fullName} run gap`}
                   style={{ cursor: 'pointer', outline: 'none' }}
                   onClick={() => handleGapClick(g.gap_key)}
-                  onMouseEnter={() => setHoveredGapKey(g.gap_key)}
-                  onMouseLeave={() => setHoveredGapKey(null)}
+                  onMouseEnter={(e) => {
+                    setHoveredGapKey(g.gap_key);
+                    const rect = cardRef.current?.getBoundingClientRect();
+                    setGapTip({ x: rect ? e.clientX - rect.left : 200, y: rect ? e.clientY - rect.top : 260, gapKey: g.gap_key, w: rect?.width ?? 640, h: rect?.height ?? 500 });
+                  }}
+                  onMouseLeave={() => { setHoveredGapKey(null); setGapTip(null); }}
+                  onFocus={() => {
+                    setHoveredGapKey(g.gap_key);
+                    setGapTip({ x: 40 + conf.x + conf.w / 2, y: 40 + LOS_Y - 120, gapKey: g.gap_key, w: cardRef.current?.clientWidth ?? 640, h: cardRef.current?.clientHeight ?? 500 });
+                  }}
+                  onBlur={() => { setHoveredGapKey(null); setGapTip(null); }}
                 >
+                  {/* Low-opacity heat band for the whole gap lane (rushing view) */}
+                  {view === 'run' && (
+                    <rect
+                      x={conf.x}
+                      y={GAP_BAND_Y}
+                      width={conf.w}
+                      height={GAP_BAND_H}
+                      rx={6}
+                      fill={side === 'offense' ? 'var(--series-3)' : 'var(--series-4)'}
+                      opacity={isSelected || isHovered ? BAND_FOCUS_OPACITY : Math.max(0.05, volumeStrength * 0.4)}
+                    />
+                  )}
                   <rect
                     x={conf.x}
                     y={LOS_Y - 15}
@@ -1285,22 +1439,24 @@ export function SingleTeamHeatmap({ data }: SingleTeamHeatmapProps) {
                   >
                     {conf.abbr}
                   </text>
-                  <text
-                    x={conf.x + conf.w / 2}
-                    y={LOS_Y + 9}
-                    textAnchor="middle"
-                    fontSize={9}
-                    fontWeight={600}
-                    fill="var(--ink-2)"
-                  >
-                    {g.carries}c · {g.ypc}y
-                  </text>
+                  {view !== 'run' && (
+                    <text
+                      x={conf.x + conf.w / 2}
+                      y={LOS_Y + 9}
+                      textAnchor="middle"
+                      fontSize={9}
+                      fontWeight={600}
+                      fill="var(--ink-2)"
+                    >
+                      {g.carries}c · {g.ypc}y
+                    </text>
+                  )}
                 </g>
               );
             })}
 
-          {/* Individual Pass Play Vectors */}
-          {showVectors && (view === 'both' || view === 'pass') &&
+          {/* Individual Pass Play Vectors (passing view only) */}
+          {showVectors && view === 'pass' &&
             activeUnit.passing.plays.map((p, i) => {
               const x = laneX(p.location, i);
               const yTarget = depthY(p.depth);
@@ -1365,27 +1521,24 @@ export function SingleTeamHeatmap({ data }: SingleTeamHeatmapProps) {
               );
             })}
 
-          {/* Individual Run Play Vectors (revealed on gap focus) */}
-          {showVectors && (view === 'both' || view === 'run') &&
+          {/* Individual Run Play Vectors (rushing view only: every carry is drawn automatically) */}
+          {showVectors && view === 'run' &&
             activeUnit.rushing.plays.map((r, i) => {
               const x = gapX(r.gap_key, i);
               const yBackfield = LOS_Y + 16;
               const yEnd = depthY(r.yards);
               const isTfl = r.yards < 0;
 
-              const isThisGapFocused = effectiveFocusGap ? r.gap_key === effectiveFocusGap : false;
-
-              if (!isThisGapFocused && !r.touchdown) {
-                return null;
-              }
-
-              const color = r.touchdown ? 'var(--series-2)' : isTfl ? '#ef4444' : 'var(--series-3)';
-              const opacity = isThisGapFocused ? 0.85 : 0.65;
+              const color = r.touchdown ? '#dc2626' : isTfl ? '#ef4444' : 'var(--series-3)';
+              const opacity = runTrailOpacity(r, effectiveFocusGap);
 
               return (
-                <g key={`sr-${r.play_id}`} opacity={opacity}>
+                <g key={`sr-${r.play_id}`} opacity={opacity} pointerEvents="none">
                   <line x1={x} y1={yBackfield} x2={x} y2={yEnd} stroke={color} strokeWidth={r.touchdown ? 2.5 : 1.75} strokeLinecap="round" />
                   <circle cx={x} cy={yEnd} r={r.touchdown ? 4.5 : isTfl ? 3.5 : 3.0} fill={color} stroke="var(--surface)" strokeWidth={1.2} />
+                  {r.touchdown && (
+                    <text x={x} y={yEnd - 7} textAnchor="middle" fontSize={8.5} fontWeight={800} fill="#dc2626">TD</text>
+                  )}
                 </g>
               );
             })}
@@ -1398,10 +1551,44 @@ export function SingleTeamHeatmap({ data }: SingleTeamHeatmapProps) {
             <text x={170} y={4} fill="var(--ink-2)">Run Gain</text>
             <circle cx={270} cy={0} r={4} fill="#ef4444" />
             <text x={280} y={4} fill="var(--ink-2)">Tackle for loss / Stop</text>
-            <circle cx={440} cy={0} r={4.5} fill="var(--series-2)" />
+            <circle cx={440} cy={0} r={4.5} fill="#dc2626" />
             <text x={450} y={4} fill="var(--ink-2)">Touchdown</text>
           </g>
         </svg>
+
+        {/* Rushing-view carrier tooltip */}
+        {view === 'run' && gapTip && (() => {
+          const tipGap = activeUnit.rushing.gaps.find((g) => g.gap_key === gapTip.gapKey);
+          if (!tipGap) return null;
+          const conf = GAP_CONFIG[tipGap.gap_key] ?? GAP_CONFIG['middle'];
+          return (
+            <div
+              style={{
+                position: 'absolute',
+                left: Math.max(10, Math.min(gapTip.x + 12, gapTip.w - 340)),
+                top: Math.max(10, Math.min(gapTip.y - 40, gapTip.h - 230)),
+                width: 330,
+                padding: '10px 12px',
+                background: 'var(--surface)',
+                border: '1px solid var(--grid)',
+                borderRadius: 8,
+                boxShadow: '0 8px 24px rgba(0, 0, 0, 0.35)',
+                pointerEvents: 'none',
+                zIndex: 30,
+                fontSize: 11,
+                lineHeight: 1.35,
+              }}
+            >
+              <div style={{ fontWeight: 800, color: 'var(--ink)', marginBottom: 3 }}>
+                {conf.fullName} ({conf.abbr})
+              </div>
+              <div style={{ fontWeight: 700, color: 'var(--ink-2)', marginBottom: 3 }}>
+                {side === 'offense' ? `${data.team.abbr} carries` : `Carries allowed by ${data.team.abbr}`} ({data.sample_games.length} games)
+              </div>
+              <RushersTable rushers={tipGap.top_rushers ?? []} emptyText="No carries in this gap" />
+            </div>
+          );
+        })()}
       </div>
 
       {/* Receiver Inspector for selected zone */}
@@ -1534,6 +1721,15 @@ export function SingleTeamHeatmap({ data }: SingleTeamHeatmapProps) {
             <div>Yards: <strong>{selectedGap.yards}</strong> ({selectedGap.ypc} YPC)</div>
             <div>EPA/carry: <strong style={{ color: selectedGap.epa_avg >= 0 ? (side === 'offense' ? 'var(--good)' : 'var(--bad)') : (side === 'offense' ? 'var(--bad)' : 'var(--good)') }}>{selectedGap.epa_avg > 0 ? `+${selectedGap.epa_avg.toFixed(2)}` : selectedGap.epa_avg.toFixed(2)}</strong></div>
             <div>Success Rate: <strong>{Math.round(selectedGap.success_rate * 100)}%</strong></div>
+          </div>
+          <div style={{ marginTop: 12 }}>
+            <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 6 }}>
+              {side === 'offense' ? `${data.team.abbr} rushers` : `Rushers vs ${data.team.abbr} defense`} in {selectedGap.label}
+              <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--muted)', marginLeft: 8 }}>
+                last {data.sample_games.length} games
+              </span>
+            </div>
+            <RushersTable rushers={selectedGap.top_rushers ?? []} emptyText="No carries in this gap" />
           </div>
         </div>
       )}
