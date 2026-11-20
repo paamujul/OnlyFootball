@@ -100,6 +100,11 @@ jobs:
       GCP_REGION: ${{ secrets.GCP_REGION || 'us-central1' }}
       SERVICE_NAME: ${{ secrets.CLOUD_RUN_SERVICE || 'playbook' }}
       REPO_NAME: ${{ secrets.ARTIFACT_REGISTRY_REPO || 'playbook' }}
+      GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+      GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -116,8 +121,6 @@ jobs:
       - name: Authenticate to Google Cloud (Service Account Key)
         if: env.GCP_SA_KEY != ''
         uses: google-github-actions/auth@v2
-        env:
-          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
 
@@ -144,13 +147,45 @@ jobs:
           docker push "${IMAGE_TAG}"
           docker push "${LATEST_TAG}"
 
+      - name: Run database migrations (Cloud Run job)
+        env:
+          IMAGE_TAG: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.REPO_NAME }}/app:${{ github.sha }}
+          PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+        run: |
+          gcloud run jobs deploy playbook-migrate \
+            --image "${IMAGE_TAG}" \
+            --region "${GCP_REGION}" \
+            --project "${PROJECT_ID}" \
+            --service-account "playbook-runtime@${PROJECT_ID}.iam.gserviceaccount.com" \
+            --set-cloudsql-instances "${PROJECT_ID}:${GCP_REGION}:playbook-db" \
+            --set-secrets "DATABASE_URL=playbook-database-url:latest" \
+            --command alembic \
+            --args upgrade,head \
+            --max-retries 0
+          gcloud run jobs execute playbook-migrate \
+            --region "${GCP_REGION}" \
+            --project "${PROJECT_ID}" \
+            --wait
+
       - name: Deploy to Cloud Run
         uses: google-github-actions/deploy-cloudrun@v2
         with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
           service: ${{ env.SERVICE_NAME }}
           image: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.REPO_NAME }}/app:${{ github.sha }}
           region: ${{ env.GCP_REGION }}
           flags: |
             --allow-unauthenticated
             --no-cpu-throttling
+            --service-account=playbook-runtime@${{ secrets.GCP_PROJECT_ID }}.iam.gserviceaccount.com
+            --add-cloudsql-instances=${{ secrets.GCP_PROJECT_ID }}:${{ env.GCP_REGION }}:playbook-db
+            --set-secrets=DATABASE_URL=playbook-database-url:latest
+            --set-env-vars=AUTO_SEED=0
+            --min-instances=1
+            --max-instances=1
+            --memory=2Gi
+            --cpu=1
+            --port=8080
+            --startup-probe=httpGet.path=/api/,httpGet.port=8080,periodSeconds=5,timeoutSeconds=3,failureThreshold=30
+            --liveness-probe=httpGet.path=/api/,httpGet.port=8080,periodSeconds=30,timeoutSeconds=5,failureThreshold=3
 

@@ -12,7 +12,10 @@ frontend/dist
 
 # Python
 backend/.venv
-backend/storage
+# Runtime state is excluded, but the tracked ML model artifacts (~2 MB) must
+# ship in the image. Ignore the CONTENTS (not the dir) so the re-include works.
+backend/storage/*
+!backend/storage/models
 backend/.pytest_cache
 **/__pycache__
 **/*.pyc
