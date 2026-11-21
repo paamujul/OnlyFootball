@@ -108,3 +108,45 @@ def test_health_ok_after_a_successful_sync(client, session):
     session.commit()
     r = client.get("/api/health")
     assert r.status_code == 200 and r.json()["status"] == "ok"
+
+
+def test_heatmap_redzone_matchup(client):
+    g = client.game
+    q = {"teamA": g["home_team"], "teamB": g["away_team"],
+         "season": g["season"], "phase": g["phase"]}
+    r = client.get("/api/heatmap/redzone/matchup", params=q)
+    assert r.status_code == 200
+    assert "Cache-Control" in r.headers
+    body = r.json()
+    assert body["sample_games_window"] == 16
+    assert "map_a_vs_b" in body and "map_b_vs_a" in body
+    r2 = client.get("/api/heatmap/redzone/matchup", params={**q, "games": 3})
+    assert r2.json()["sample_games_window"] == 3
+
+
+def test_heatmap_redzone_matchup_excludes_plays_outside_red_zone(client, session):
+    """The route must pass red_zone=True: a 60-yard-line play is in /matchup only."""
+    from app.db.models import Play
+
+    g = client.game
+    for pid, yl in ((900001, 8), (900002, 60)):
+        session.add(Play(
+            game_id=g["id"], play_id=pid, posteam=g["home_team"], defteam=g["away_team"],
+            play_type="pass", pass_location="left", pass_depth="deep",
+            air_yards=30.0, yards_gained=30.0, complete_pass=True, touchdown=False,
+            epa=0.1, success=True, yardline_100=yl))
+    session.commit()
+    q = {"teamA": g["home_team"], "teamB": g["away_team"],
+         "season": g["season"], "phase": g["phase"]}
+
+    def left_deep_attempts(resp):
+        zones = resp.json()["map_a_vs_b"]["passing_zones"]
+        z = next(z for z in zones if z["location"] == "left" and z["depth_band"] == "deep")
+        return z["offense"]["attempts"]
+
+    red = client.get("/api/heatmap/redzone/matchup", params=q)
+    full = client.get("/api/heatmap/matchup", params=q)
+    assert red.headers["Cache-Control"] == "public, max-age=300"
+    # the red-zone response keeps the yl=8 play and drops the yl=60 play
+    assert left_deep_attempts(full) - left_deep_attempts(red) >= 1
+    assert left_deep_attempts(red) >= 1

@@ -73,7 +73,8 @@ def get_recent_games(session: Session, team: str, season: int, phase: str, n: in
     return sorted(games, key=lambda g: g.week)
 
 
-def team_field_heatmap(session: Session, team: str, season: int, phase: str, last_n_games: int = 4) -> dict[str, Any]:
+def team_field_heatmap(session: Session, team: str, season: int, phase: str, last_n_games: int = 4,
+                       red_zone: bool = False) -> dict[str, Any]:
     """Build field heatmap data for a single team's offense and defense."""
     team_obj = session.get(Team, team)
     recent = get_recent_games(session, team, season, phase, last_n_games)
@@ -105,17 +106,22 @@ def team_field_heatmap(session: Session, team: str, season: int, phase: str, las
             "defense": {"passing": {"zones": [], "plays": []}, "rushing": {"gaps": [], "plays": []}},
         }
 
+    # Red zone = inside the opponent 20 (yardline_100 known and <= 20)
+    zone_filter = [Play.yardline_100.is_not(None), Play.yardline_100 <= 20] if red_zone else []
+
     # Query offensive plays
     off_plays = session.scalars(
         select(Play)
-        .where(Play.game_id.in_(game_ids), Play.posteam == team, Play.play_type.in_(["pass", "run"]))
+        .where(Play.game_id.in_(game_ids), Play.posteam == team, Play.play_type.in_(["pass", "run"]),
+               *zone_filter)
         .order_by(Play.game_id, Play.play_id)
     ).all()
 
     # Query defensive plays (opponent plays when this team was on defense)
     def_plays = session.scalars(
         select(Play)
-        .where(Play.game_id.in_(game_ids), Play.defteam == team, Play.play_type.in_(["pass", "run"]))
+        .where(Play.game_id.in_(game_ids), Play.defteam == team, Play.play_type.in_(["pass", "run"]),
+               *zone_filter)
         .order_by(Play.game_id, Play.play_id)
     ).all()
 
@@ -296,6 +302,7 @@ def _build_pass_vectors(plays: list[Play], player_names: dict[str, str], max_pla
             "game_id": p.game_id,
             "quarter": p.quarter,
             "clock": p.clock,
+            "yardline_100": p.yardline_100,
             "passer": player_names.get(p.passer_id or "", p.passer_id or "QB"),
             "receiver": player_names.get(p.receiver_id or "", p.receiver_id or "Receiver"),
             "location": loc,
@@ -405,6 +412,7 @@ def _build_run_vectors(plays: list[Play], player_names: dict[str, str], max_play
             "game_id": p.game_id,
             "quarter": p.quarter,
             "clock": p.clock,
+            "yardline_100": p.yardline_100,
             "rusher": player_names.get(p.rusher_id or "", p.rusher_id or "Rusher"),
             "gap_key": gk,
             "location": p.run_location,
@@ -493,13 +501,14 @@ def matchup_heatmap(
     season: int,
     phase: str,
     last_n_games: int = 4,
+    red_zone: bool = False,
 ) -> dict[str, Any]:
     """Generate both matchup overlay maps:
     1. Team A Offense vs Team B Defense
     2. Team B Offense vs Team A Defense
     """
-    data_a = team_field_heatmap(session, team_a, season, phase, last_n_games)
-    data_b = team_field_heatmap(session, team_b, season, phase, last_n_games)
+    data_a = team_field_heatmap(session, team_a, season, phase, last_n_games, red_zone=red_zone)
+    data_b = team_field_heatmap(session, team_b, season, phase, last_n_games, red_zone=red_zone)
 
     map_a_vs_b = _build_overlay_map(
         offense_team=data_a["team"],

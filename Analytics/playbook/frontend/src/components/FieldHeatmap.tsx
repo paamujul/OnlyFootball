@@ -1,5 +1,6 @@
 import { useState, useMemo, useRef, useEffect } from 'react';
 import type {
+  HeatmapPassVector,
   HeatmapRushStat,
   HeatmapRunVector,
   MatchupOverlayGap,
@@ -62,6 +63,94 @@ const GAP_BAND_Y = depthY(45);
 const GAP_BAND_H = LOS_Y + 15 - GAP_BAND_Y;
 const BAND_BASE_OPACITY = 0.12;
 const BAND_FOCUS_OPACITY = 0.24;
+
+// ---------------------------------------------------------------------------
+// Field scale: maps depth (yards from the line of scrimmage) to SVG y and
+// carries every depth-dependent layout piece. The matchup component picks one
+// from its `redZone` prop; the full-field scale is built from the module
+// constants above, so default rendering is unchanged.
+// ---------------------------------------------------------------------------
+type ZoneBoxes = Record<string, Record<string, { x: number; y: number; w: number; h: number }>>;
+
+interface FieldScale {
+  depthY: (depth: number) => number;
+  yardLines: { yd: number; label: string; strong: boolean }[];
+  hashes: number[];
+  zoneBoxes: ZoneBoxes;
+  gapBandY: number;
+  gapBandH: number;
+  // Optional end-zone band drawn above the top line (red-zone view only)
+  endZone: { y: number; h: number } | null;
+  passTargetY: (p: HeatmapPassVector) => number;
+  passYacY: (p: HeatmapPassVector, yTarget: number) => number | null;
+  runEndY: (r: HeatmapRunVector) => number;
+}
+
+const FULL_FIELD_SCALE: FieldScale = {
+  depthY,
+  yardLines: [0, 10, 20, 30, 40].map((yd) => ({ yd, label: yd === 0 ? 'LOS' : `+${yd}`, strong: yd === 0 })),
+  hashes: [5, 15, 25, 35],
+  zoneBoxes: ZONE_BOXES,
+  gapBandY: GAP_BAND_Y,
+  gapBandH: GAP_BAND_H,
+  endZone: null,
+  passTargetY: (p) => depthY(p.depth),
+  passYacY: (p, yTarget) => (p.complete && p.yac ? Math.max(14, yTarget - p.yac * PX_PER_YD) : null),
+  runEndY: (r) => depthY(r.yards),
+};
+
+// Red-zone scale: 0-20 yards from the LOS at 16 px/yd, so +20 (the goal line
+// for a snap at the 20) lands at y=40, leaving y=8..40 for the end zone.
+const RZ_MAX_DEPTH = 20;
+const RZ_PX_PER_YD = 16;
+
+function rzDepthY(depth: number): number {
+  return LOS_Y - Math.max(0, Math.min(RZ_MAX_DEPTH, depth)) * RZ_PX_PER_YD;
+}
+
+// Furthest depth a play can travel: its own goal line when known, else +20.
+function rzCap(yardline100: number | null | undefined): number {
+  return yardline100 != null ? Math.min(RZ_MAX_DEPTH, Math.max(0, yardline100)) : RZ_MAX_DEPTH;
+}
+
+function rzBox(x: number, top: number, bottom: number) {
+  return { x, y: rzDepthY(top), w: 136, h: rzDepthY(bottom) - rzDepthY(top) };
+}
+
+// Deep = 15+ air yards (backend threshold), short = under 15
+const RZ_ZONE_BOXES: ZoneBoxes = {
+  deep: {
+    left: rzBox(62, 19.5, 15),
+    middle: rzBox(212, 19.5, 15),
+    right: rzBox(362, 19.5, 15),
+  },
+  short: {
+    left: rzBox(62, 14, 1),
+    middle: rzBox(212, 14, 1),
+    right: rzBox(362, 14, 1),
+  },
+};
+
+const RZ_GAP_BAND_Y = rzDepthY(RZ_MAX_DEPTH);
+
+const RED_ZONE_SCALE: FieldScale = {
+  depthY: rzDepthY,
+  yardLines: [0, 5, 10, 15, 20].map((yd) => ({
+    yd,
+    label: yd === 0 ? 'LOS' : yd === RZ_MAX_DEPTH ? 'GOAL' : `+${yd}`,
+    strong: yd === 0 || yd === RZ_MAX_DEPTH,
+  })),
+  hashes: [1, 2, 3, 4, 6, 7, 8, 9, 11, 12, 13, 14, 16, 17, 18, 19],
+  zoneBoxes: RZ_ZONE_BOXES,
+  gapBandY: RZ_GAP_BAND_Y,
+  gapBandH: LOS_Y + 15 - RZ_GAP_BAND_Y,
+  endZone: { y: 8, h: rzDepthY(RZ_MAX_DEPTH) - 8 },
+  passTargetY: (p) => rzDepthY(Math.min(p.depth, rzCap(p.yardline_100))),
+  passYacY: (p) => (p.complete && p.yac ? rzDepthY(Math.min(p.depth + p.yac, rzCap(p.yardline_100))) : null),
+  runEndY: (r) => rzDepthY(Math.min(r.yards, rzCap(r.yardline_100))),
+};
+
+const RZ_MIN_PLAYS = 5;
 
 function signed(v: number, digits = 2): string {
   return v > 0 ? `+${v.toFixed(digits)}` : v.toFixed(digits);
@@ -207,6 +296,8 @@ export interface MatchupHeatmapProps {
   selectedGapKey?: string | null;
   onSelectGapKey?: (key: string | null, mapId: 'map_a' | 'map_b') => void;
   selectedMapId?: 'map_a' | 'map_b' | null;
+  // Zoomed 0-20 yard field for the Red-Zone tab
+  redZone?: boolean;
 }
 
 export function MatchupFieldHeatmap({
@@ -221,7 +312,9 @@ export function MatchupFieldHeatmap({
   selectedGapKey,
   onSelectGapKey,
   selectedMapId,
+  redZone,
 }: MatchupHeatmapProps) {
+  const fieldScale = redZone ? RED_ZONE_SCALE : FULL_FIELD_SCALE;
   const [view, setView] = useState<'both' | 'pass' | 'run'>('both');
   const [showVectors, setShowVectors] = useState(true);
   const [localHoveredZone, setLocalHoveredZone] = useState<string | null>(null);
@@ -269,6 +362,9 @@ export function MatchupFieldHeatmap({
   const runPlays = useMemo(() => {
     return data.rushing_plays;
   }, [data.rushing_plays]);
+
+  const playCount = passPlays.length + runPlays.length;
+  const showEmptyState = Boolean(redZone) && playCount < RZ_MIN_PLAYS;
 
   // Tooltip positioning helper
   const updateTooltipPos = (e: React.MouseEvent) => {
@@ -414,6 +510,11 @@ export function MatchupFieldHeatmap({
           <span style={{ fontWeight: 800, fontSize: 15 }}>
             {data.defense_team.abbr} <span style={{ color: 'var(--muted)', fontWeight: 400 }}>Defense</span>
           </span>
+          {redZone && (
+            <span style={{ marginLeft: 4, fontSize: 11.5, fontWeight: 600, color: 'var(--muted)' }}>
+              {playCount} red-zone {playCount === 1 ? 'play' : 'plays'}
+            </span>
+          )}
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -456,7 +557,21 @@ export function MatchupFieldHeatmap({
         </div>
       </div>
 
+      {/* Red-zone empty state: too few plays to chart this side */}
+      {showEmptyState && (
+        <div
+          role="status"
+          style={{ maxWidth: 600, margin: '0 auto', padding: '48px 20px', textAlign: 'center', background: 'var(--surface)', borderRadius: 12, border: '1px dashed var(--grid)', color: 'var(--muted)', fontSize: 13 }}
+        >
+          <div style={{ fontWeight: 700, color: 'var(--ink-2)', marginBottom: 4 }}>
+            Not enough red-zone plays to chart
+          </div>
+          {data.offense_team.abbr} has {playCount} red-zone {playCount === 1 ? 'play' : 'plays'} in this sample (need at least {RZ_MIN_PLAYS}).
+        </div>
+      )}
+
       {/* SVG Football Field with Interactive Tooltip */}
+      {!showEmptyState && (
       <div
         ref={containerRef}
         onMouseMove={updateTooltipPos}
@@ -479,33 +594,47 @@ export function MatchupFieldHeatmap({
             stroke="var(--grid)"
           />
 
+          {/* End zone band (red-zone view only) */}
+          {fieldScale.endZone && (
+            <rect
+              x={38}
+              y={fieldScale.endZone.y + 2}
+              width={484}
+              height={fieldScale.endZone.h - 2}
+              rx={8}
+              fill="#dc2626"
+              opacity={0.06}
+              pointerEvents="none"
+            />
+          )}
+
           {/* Yard Lines */}
-          {[0, 10, 20, 30, 40].map((yd) => (
+          {fieldScale.yardLines.map(({ yd, label, strong }) => (
             <g key={yd}>
               <line
                 x1={38}
                 x2={522}
-                y1={depthY(yd)}
-                y2={depthY(yd)}
-                stroke={yd === 0 ? 'var(--baseline)' : 'var(--grid)'}
-                strokeWidth={yd === 0 ? 1.8 : 0.8}
+                y1={fieldScale.depthY(yd)}
+                y2={fieldScale.depthY(yd)}
+                stroke={strong ? 'var(--baseline)' : 'var(--grid)'}
+                strokeWidth={strong ? 1.8 : 0.8}
               />
               <text
                 x={518}
-                y={depthY(yd) - 4}
+                y={fieldScale.depthY(yd) - 4}
                 textAnchor="end"
                 fontSize={9.5}
                 fill="var(--muted)"
-                fontWeight={yd === 0 ? 700 : 400}
+                fontWeight={strong ? 700 : 400}
               >
-                {yd === 0 ? 'LOS' : `+${yd}`}
+                {label}
               </text>
             </g>
           ))}
 
           {/* Hash marks */}
-          {[5, 15, 25, 35].map((yd) => {
-            const y = depthY(yd);
+          {fieldScale.hashes.map((yd) => {
+            const y = fieldScale.depthY(yd);
             return (
               <g key={yd}>
                 <line x1={228} x2={234} y1={y} y2={y} stroke="var(--grid)" strokeWidth={0.8} />
@@ -517,7 +646,7 @@ export function MatchupFieldHeatmap({
           {/* PASSING ZONES (6 zones) */}
           {(view === 'both' || view === 'pass') &&
             data.passing_zones.map((z) => {
-              const boxGroup = ZONE_BOXES[z.depth_band];
+              const boxGroup = fieldScale.zoneBoxes[z.depth_band];
               const box = boxGroup ? boxGroup[z.location] : null;
               if (!box) return null;
 
@@ -646,9 +775,9 @@ export function MatchupFieldHeatmap({
                   {view === 'run' && (
                     <rect
                       x={conf.x}
-                      y={GAP_BAND_Y}
+                      y={fieldScale.gapBandY}
                       width={conf.w}
-                      height={GAP_BAND_H}
+                      height={fieldScale.gapBandH}
                       rx={6}
                       fill={style.fill}
                       opacity={isSelected || isHovered ? BAND_FOCUS_OPACITY : BAND_BASE_OPACITY}
@@ -716,9 +845,9 @@ export function MatchupFieldHeatmap({
           {showVectors && view === 'pass' &&
             passPlays.map((p, i) => {
               const x = laneX(p.location, i);
-              const yTarget = depthY(p.depth);
+              const yTarget = fieldScale.passTargetY(p);
               const bend = p.location === 'left' ? -20 : p.location === 'right' ? 20 : 0;
-              const yacY = p.complete && p.yac ? Math.max(14, yTarget - p.yac * PX_PER_YD) : null;
+              const yacY = fieldScale.passYacY(p, yTarget);
 
               const playZoneKey = `${p.location}-${p.depth_band}`;
               const isInFocusZone = effectiveFocusZone ? playZoneKey === effectiveFocusZone : false;
@@ -810,7 +939,7 @@ export function MatchupFieldHeatmap({
             runPlays.map((r, i) => {
               const x = gapX(r.gap_key, i);
               const yBackfield = LOS_Y + 16;
-              const yEnd = depthY(r.yards);
+              const yEnd = fieldScale.runEndY(r);
               const isTfl = r.yards < 0;
 
               const color = r.touchdown ? '#dc2626' : isTfl ? '#ef4444' : 'var(--series-3)';
@@ -928,6 +1057,7 @@ export function MatchupFieldHeatmap({
           </div>
         )}
       </div>
+      )}
 
       {/* Selected Inspector Breakdown Card */}
       {(selectedZone || selectedGap) && isMyMapSelected && (

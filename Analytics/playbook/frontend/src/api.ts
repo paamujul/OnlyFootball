@@ -394,6 +394,9 @@ export interface HeatmapPassVector {
   sack: boolean;
   epa: number | null;
   desc: string | null;
+  // Distance from the opponent's end zone at the snap; present on newer
+  // payloads (used by the red-zone view to cap trails at the goal line).
+  yardline_100?: number | null;
 }
 
 export interface HeatmapRushStat {
@@ -434,6 +437,8 @@ export interface HeatmapRunVector {
   touchdown: boolean;
   epa: number | null;
   desc: string | null;
+  // Distance from the opponent's end zone at the snap (see HeatmapPassVector).
+  yardline_100?: number | null;
 }
 
 export interface TeamHeatmap {
@@ -556,6 +561,8 @@ export const api = {
     get<UpcomingMatchupsResponse>(`/api/heatmap/upcoming?season=${season}&phase=${phase}`),
   heatmapMatchup: (teamA: string, teamB: string, season: number, phase: string, games: number = 4) =>
     get<MatchupHeatmap>(`/api/heatmap/matchup?teamA=${teamA}&teamB=${teamB}&season=${season}&phase=${phase}&games=${games}`),
+  redzoneMatchup: (teamA: string, teamB: string, season: number, phase: string, games: number = 16) =>
+    get<MatchupHeatmap>(`/api/heatmap/redzone/matchup?teamA=${teamA}&teamB=${teamB}&season=${season}&phase=${phase}&games=${games}`),
   heatmapTeam: (team: string, season: number, phase: string, games: number = 4) =>
     get<TeamHeatmap>(`/api/heatmap/team?team=${team}&season=${season}&phase=${phase}&games=${games}`),
 };
