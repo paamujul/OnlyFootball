@@ -352,3 +352,42 @@ a.chip:hover { border-color: var(--series-1); }
 @media (max-width: 720px) {
   .mix-row { grid-template-columns: 80px 1fr 48px 46px; }
 }
+
+
+/* --- design pass: segmented tabs, stat tiles, panels, page head ------------- */
+
+/* segmented control -> underline tabs (used by the coaching tabs and the heat-map views) */
+.controls .seg, .seg { border: 0; border-bottom: 1px solid var(--grid); border-radius: 0; background: transparent; padding: 0; gap: var(--s-1); }
+.seg button {
+  border-radius: 0; padding: 8px 12px; color: var(--ink-2); font-weight: 500;
+  border-bottom: 2px solid transparent; margin-bottom: -1px;
+  transition: color 0.12s ease, border-color 0.12s ease;
+}
+.seg button:hover:not(:disabled) { color: var(--ink); border-bottom-color: var(--baseline); }
+.seg button.on { background: transparent; color: var(--ink); font-weight: 600; border-bottom-color: var(--ink); }
+
+/* page head: smaller team marker, calmer title */
+.page-head h1 { font-size: 28px; font-weight: 700; letter-spacing: -0.025em; }
+.accent-chip { width: 4px; height: 30px; border-radius: 2px; }
+
+/* stat tiles: a ruled strip instead of four boxes */
+.stat-row { gap: 0; border-top: 1px solid var(--grid); border-bottom: 1px solid var(--grid); }
+.stat-row .card, .stat-row .stat-tile { background: transparent; border: 0; border-radius: 0; padding: var(--s-3) var(--s-4); }
+.stat-row > * + * { border-left: 1px solid var(--grid); }
+.stat-tile .k { color: var(--muted); font-size: 11.5px; font-weight: 600; letter-spacing: 0.06em; }
+.stat-tile .v { font-size: 28px; font-weight: 700; }
+
+/* panels that only hold a grid of figures lose their box */
+.card.charted-grid { background: transparent; border: 0; border-top: 1px solid var(--grid); border-radius: 0; padding: var(--s-3) 0 0; }
+.charted .k { color: var(--muted); font-size: 11.5px; letter-spacing: 0.06em; }
+.charted .v { font-size: 26px; }
+
+h2.section { font-size: 15px; font-weight: 600; margin: 32px 0 var(--s-2); }
+h2.section small { font-weight: 400; }
+
+/* notices: a rule and a tint, no heavy bar */
+.verdict { border-left-width: 2px; border-radius: 0; background: transparent; padding: var(--s-2) var(--s-3); }
+.verdict.warn { background: color-mix(in oklab, var(--series-4) 7%, transparent); }
+
+/* selects and plain buttons in control rows */
+.controls select { border-radius: var(--radius); font-size: 13.5px; }

@@ -153,9 +153,9 @@ export default function MatchupHeatmapShell({
                     flex: '0 0 auto',
                     padding: '8px 12px',
                     borderRadius: 8,
-                    background: isSelected ? 'var(--surface)' : 'var(--page)',
-                    border: isSelected ? '2px solid var(--series-1)' : '1px solid var(--border)',
-                    boxShadow: isSelected ? 'var(--shadow)' : 'none',
+                    background: isSelected ? 'var(--surface)' : 'transparent',
+                    border: isSelected ? '1px solid var(--ink)' : '1px solid var(--border)',
+                    boxShadow: isSelected ? 'inset 0 0 0 1px var(--ink)' : 'none',
                     cursor: 'pointer',
                     display: 'flex',
                     alignItems: 'center',
@@ -185,10 +185,11 @@ export default function MatchupHeatmapShell({
 
       {/* Matchup Controls: Team Selectors & Sample Window */}
       <div
-        className="card"
         style={{
-          padding: '14px 18px',
+          padding: '14px 0',
           marginBottom: 20,
+          borderTop: '1px solid var(--grid)',
+          borderBottom: '1px solid var(--grid)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
@@ -287,15 +288,13 @@ export default function MatchupHeatmapShell({
         style={{
           display: 'flex',
           alignItems: 'center',
-          justifyContent: 'center',
+          justifyContent: 'flex-start',
           flexWrap: 'wrap',
           gap: 16,
-          padding: '10px 16px',
-          background: 'var(--surface)',
-          borderRadius: 8,
-          border: '1px solid var(--grid)',
+          padding: '0',
           marginBottom: 20,
           fontSize: 12,
+          color: 'var(--ink-2)',
         }}
       >
         <span style={{ fontWeight: 700, color: 'var(--ink)' }}>Heat Color Guide:</span>
@@ -347,10 +346,10 @@ export default function MatchupHeatmapShell({
           {/* Map 1: Team A Offense vs Team B Defense */}
           <div>
             <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span className="badge" style={{ background: 'var(--series-1)', color: '#fff', fontWeight: 800 }}>
+              <span className="badge" style={{ background: 'transparent', color: 'var(--series-1)', border: '1px solid currentColor', fontWeight: 700 }}>
                 Map 1
               </span>
-              <h2 style={{ margin: 0, fontSize: 17 }}>
+              <h2 style={{ margin: 0, fontSize: 16, fontWeight: 600, letterSpacing: '-0.01em' }}>
                 {matchupData.map_a_vs_b.title}
               </h2>
             </div>
@@ -381,10 +380,10 @@ export default function MatchupHeatmapShell({
           {/* Map 2: Team B Offense vs Team A Defense */}
           <div>
             <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span className="badge" style={{ background: 'var(--series-2)', color: '#fff', fontWeight: 800 }}>
+              <span className="badge" style={{ background: 'transparent', color: 'var(--series-2)', border: '1px solid currentColor', fontWeight: 700 }}>
                 Map 2
               </span>
-              <h2 style={{ margin: 0, fontSize: 17 }}>
+              <h2 style={{ margin: 0, fontSize: 16, fontWeight: 600, letterSpacing: '-0.01em' }}>
                 {matchupData.map_b_vs_a.title}
               </h2>
             </div>

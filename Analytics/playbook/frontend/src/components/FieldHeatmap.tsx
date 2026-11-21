@@ -493,7 +493,7 @@ export function MatchupFieldHeatmap({
   };
 
   return (
-    <div className="card" style={{ padding: '16px 18px', marginBottom: 20 }}>
+    <div style={{ marginBottom: 20 }}>
       {/* Header with Title and Filters */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10, marginBottom: 12 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -518,12 +518,12 @@ export function MatchupFieldHeatmap({
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div className="btn-group" style={{ display: 'inline-flex', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: 2 }}>
+          <div className="btn-group" style={{ display: 'inline-flex', gap: 2, borderBottom: '1px solid var(--grid)' }}>
             <button
               type="button"
               className={view === 'both' ? 'active' : ''}
               onClick={() => { setView('both'); onSelectZoneKey?.(null, mapId); onSelectGapKey?.(null, mapId); }}
-              style={{ padding: '4px 9px', fontSize: 11.5, borderRadius: 6, border: 'none', background: view === 'both' ? 'var(--page)' : 'transparent', color: 'var(--ink)', cursor: 'pointer', fontWeight: 600 }}
+              style={{ padding: '6px 10px', fontSize: 12, borderRadius: 0, border: 'none', borderBottom: view === 'both' ? '2px solid var(--ink)' : '2px solid transparent', marginBottom: -1, background: 'transparent', color: view === 'both' ? 'var(--ink)' : 'var(--ink-2)', cursor: 'pointer', fontWeight: view === 'both' ? 600 : 500 }}
             >
               Pass & Run
             </button>
@@ -531,7 +531,7 @@ export function MatchupFieldHeatmap({
               type="button"
               className={view === 'pass' ? 'active' : ''}
               onClick={() => { setView('pass'); onSelectGapKey?.(null, mapId); }}
-              style={{ padding: '4px 9px', fontSize: 11.5, borderRadius: 6, border: 'none', background: view === 'pass' ? 'var(--page)' : 'transparent', color: 'var(--ink)', cursor: 'pointer', fontWeight: 600 }}
+              style={{ padding: '6px 10px', fontSize: 12, borderRadius: 0, border: 'none', borderBottom: view === 'pass' ? '2px solid var(--ink)' : '2px solid transparent', marginBottom: -1, background: 'transparent', color: view === 'pass' ? 'var(--ink)' : 'var(--ink-2)', cursor: 'pointer', fontWeight: view === 'pass' ? 600 : 500 }}
             >
               Passing
             </button>
@@ -539,7 +539,7 @@ export function MatchupFieldHeatmap({
               type="button"
               className={view === 'run' ? 'active' : ''}
               onClick={() => { setView('run'); onSelectZoneKey?.(null, mapId); }}
-              style={{ padding: '4px 9px', fontSize: 11.5, borderRadius: 6, border: 'none', background: view === 'run' ? 'var(--page)' : 'transparent', color: 'var(--ink)', cursor: 'pointer', fontWeight: 600 }}
+              style={{ padding: '6px 10px', fontSize: 12, borderRadius: 0, border: 'none', borderBottom: view === 'run' ? '2px solid var(--ink)' : '2px solid transparent', marginBottom: -1, background: 'transparent', color: view === 'run' ? 'var(--ink)' : 'var(--ink-2)', cursor: 'pointer', fontWeight: view === 'run' ? 600 : 500 }}
             >
               Rushing
             </button>
@@ -1327,12 +1327,12 @@ export function SingleTeamHeatmap({ data }: SingleTeamHeatmapProps) {
       {/* Unit & Type Toggles */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, marginBottom: 16 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div className="btn-group" style={{ display: 'inline-flex', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: 2 }}>
+          <div className="btn-group" style={{ display: 'inline-flex', gap: 2, borderBottom: '1px solid var(--grid)' }}>
             <button
               type="button"
               className={side === 'offense' ? 'active' : ''}
               onClick={() => { setSide('offense'); setSelectedZoneKey(null); setSelectedGapKey(null); }}
-              style={{ padding: '6px 14px', fontSize: 13, borderRadius: 6, border: 'none', background: side === 'offense' ? 'var(--series-1)' : 'transparent', color: side === 'offense' ? '#fff' : 'var(--ink)', cursor: 'pointer', fontWeight: 700 }}
+              style={{ padding: '6px 12px', fontSize: 13, borderRadius: 0, border: 'none', borderBottom: side === 'offense' ? '2px solid var(--series-1)' : '2px solid transparent', marginBottom: -1, background: 'transparent', color: side === 'offense' ? 'var(--ink)' : 'var(--ink-2)', cursor: 'pointer', fontWeight: side === 'offense' ? 600 : 500 }}
             >
               Offense Field Map
             </button>
@@ -1340,7 +1340,7 @@ export function SingleTeamHeatmap({ data }: SingleTeamHeatmapProps) {
               type="button"
               className={side === 'defense' ? 'active' : ''}
               onClick={() => { setSide('defense'); setSelectedZoneKey(null); setSelectedGapKey(null); }}
-              style={{ padding: '6px 14px', fontSize: 13, borderRadius: 6, border: 'none', background: side === 'defense' ? 'var(--series-2)' : 'transparent', color: side === 'defense' ? '#fff' : 'var(--ink)', cursor: 'pointer', fontWeight: 700 }}
+              style={{ padding: '6px 12px', fontSize: 13, borderRadius: 0, border: 'none', borderBottom: side === 'defense' ? '2px solid var(--series-2)' : '2px solid transparent', marginBottom: -1, background: 'transparent', color: side === 'defense' ? 'var(--ink)' : 'var(--ink-2)', cursor: 'pointer', fontWeight: side === 'defense' ? 600 : 500 }}
             >
               Defense Stop Map
             </button>
@@ -1351,25 +1351,25 @@ export function SingleTeamHeatmap({ data }: SingleTeamHeatmapProps) {
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <div className="btn-group" style={{ display: 'inline-flex', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: 2 }}>
+          <div className="btn-group" style={{ display: 'inline-flex', gap: 2, borderBottom: '1px solid var(--grid)' }}>
             <button
               type="button"
               onClick={() => setView('both')}
-              style={{ padding: '4px 10px', fontSize: 12, borderRadius: 6, border: 'none', background: view === 'both' ? 'var(--page)' : 'transparent', color: 'var(--ink)', cursor: 'pointer', fontWeight: 600 }}
+              style={{ padding: '6px 10px', fontSize: 12, borderRadius: 0, border: 'none', borderBottom: view === 'both' ? '2px solid var(--ink)' : '2px solid transparent', marginBottom: -1, background: 'transparent', color: view === 'both' ? 'var(--ink)' : 'var(--ink-2)', cursor: 'pointer', fontWeight: view === 'both' ? 600 : 500 }}
             >
               Both
             </button>
             <button
               type="button"
               onClick={() => setView('pass')}
-              style={{ padding: '4px 10px', fontSize: 12, borderRadius: 6, border: 'none', background: view === 'pass' ? 'var(--page)' : 'transparent', color: 'var(--ink)', cursor: 'pointer', fontWeight: 600 }}
+              style={{ padding: '6px 10px', fontSize: 12, borderRadius: 0, border: 'none', borderBottom: view === 'pass' ? '2px solid var(--ink)' : '2px solid transparent', marginBottom: -1, background: 'transparent', color: view === 'pass' ? 'var(--ink)' : 'var(--ink-2)', cursor: 'pointer', fontWeight: view === 'pass' ? 600 : 500 }}
             >
               Passing
             </button>
             <button
               type="button"
               onClick={() => setView('run')}
-              style={{ padding: '4px 10px', fontSize: 12, borderRadius: 6, border: 'none', background: view === 'run' ? 'var(--page)' : 'transparent', color: 'var(--ink)', cursor: 'pointer', fontWeight: 600 }}
+              style={{ padding: '6px 10px', fontSize: 12, borderRadius: 0, border: 'none', borderBottom: view === 'run' ? '2px solid var(--ink)' : '2px solid transparent', marginBottom: -1, background: 'transparent', color: view === 'run' ? 'var(--ink)' : 'var(--ink-2)', cursor: 'pointer', fontWeight: view === 'run' ? 600 : 500 }}
             >
               Rushing
             </button>
