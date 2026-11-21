@@ -11,6 +11,27 @@ def _phase_game_ids(session: Session, season: int, phase: str) -> select:
     return select(Game.id).where(Game.season == season, Game.phase == phase)
 
 
+def _records(session: Session, season: int, phase: str) -> dict[str, tuple[int, int, int]]:
+    """(wins, losses, ties) per team from final games of the season phase."""
+    rec: dict[str, list[int]] = {}
+    rows = session.execute(
+        select(Game.home_team, Game.away_team, Game.home_score, Game.away_score)
+        .where(Game.season == season, Game.phase == phase, Game.status == "final")
+    ).all()
+    for home, away, hs, as_ in rows:
+        if hs is None or as_ is None:
+            continue
+        h = rec.setdefault(home, [0, 0, 0])
+        a = rec.setdefault(away, [0, 0, 0])
+        if hs > as_:
+            h[0] += 1; a[1] += 1
+        elif as_ > hs:
+            a[0] += 1; h[1] += 1
+        else:
+            h[2] += 1; a[2] += 1
+    return {t: (w, l, ti) for t, (w, l, ti) in rec.items()}
+
+
 def season_team_totals(session: Session, season: int, phase: str) -> list[dict]:
     games_q = _phase_game_ids(session, season, phase)
     agg = (
@@ -28,15 +49,18 @@ def season_team_totals(session: Session, season: int, phase: str) -> list[dict]:
         .group_by(PlayerGameStat.team)
     )
     totals = {r.team: r for r in session.execute(agg)}
+    records = _records(session, season, phase)
     teams = session.scalars(select(Team).order_by(Team.abbr)).all()
     out = []
     for t in teams:
         r = totals.get(t.abbr)
+        w, l, ti = records.get(t.abbr, (0, 0, 0))
         out.append({
             "abbr": t.abbr, "name": t.name, "conference": t.conference,
             "division": t.division, "color": t.color, "color2": t.color2,
             "logo": t.logo,
             "games": r.games if r else 0,
+            "wins": w, "losses": l, "ties": ti,
             "pass_yds": int(r.pass_yds or 0) if r else 0,
             "rush_yds": int(r.rush_yds or 0) if r else 0,
             "rec_yds": int(r.rec_yds or 0) if r else 0,

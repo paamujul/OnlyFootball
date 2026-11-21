@@ -4,7 +4,6 @@ import { createBrowserRouter, Navigate, RouterProvider } from 'react-router-dom'
 import './index.css'
 import App from './App'
 import { SeasonProvider } from './state'
-import TeamsPage from './pages/TeamsPage'
 import TeamPage from './pages/TeamPage'
 import PlayerPage from './pages/PlayerPage'
 import ComparePage from './pages/ComparePage'
@@ -18,7 +17,7 @@ const router = createBrowserRouter([
     path: '/',
     element: <App />,
     children: [
-      { index: true, element: <TeamsPage /> },
+      { index: true, element: <Navigate to="/coach" replace /> },
       { path: 'team/:abbr', element: <TeamPage /> },
       { path: 'player/:id', element: <PlayerPage /> },
       { path: 'compare', element: <ComparePage /> },

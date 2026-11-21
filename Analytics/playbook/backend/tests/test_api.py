@@ -57,6 +57,14 @@ def test_teams_and_team_detail(client):
         assert r.status_code == 200
 
 
+def test_teams_carry_a_win_loss_record(client):
+    g = client.game
+    rows = client.get("/api/teams", params={"season": g["season"], "phase": g["phase"]}).json()
+    assert all({"wins", "losses", "ties"} <= set(t) for t in rows)
+    # every final game gives one team a win and the other a loss (or both a tie)
+    assert sum(t["wins"] for t in rows) == sum(t["losses"] for t in rows)
+
+
 def test_lineup_impact(client):
     g = client.game
     q = {"season": g["season"], "phase": g["phase"], "side": "defense"}
