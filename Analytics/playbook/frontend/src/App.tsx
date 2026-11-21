@@ -65,7 +65,6 @@ export default function App() {
           {/* no `end`: stays lit on /coach/:abbr too */}
           <NavLink to="/coach" className={({ isActive }) => (isActive ? 'active' : '')}>Coaching</NavLink>
           <NavLink to="/heatmap" className={({ isActive }) => (isActive ? 'active' : '')}>Heat map</NavLink>
-          <NavLink to="/red-zone" className={({ isActive }) => (isActive ? 'active' : '')}>Red-Zone</NavLink>
         </nav>
         <div className="spacer" />
         <SeasonPicker />
