@@ -12,6 +12,7 @@ import DefenseLabPage from './pages/DefenseLabPage'
 import CoachPage from './pages/CoachPage'
 import CoachIndexPage from './pages/CoachIndexPage'
 import HeatmapPage from './pages/HeatmapPage'
+import RedZonePage from './pages/RedZonePage'
 
 const router = createBrowserRouter([
   {
@@ -26,6 +27,7 @@ const router = createBrowserRouter([
       { path: 'coach', element: <CoachIndexPage /> },
       { path: 'coach/:abbr', element: <CoachPage /> },
       { path: 'heatmap', element: <HeatmapPage /> },
+      { path: 'red-zone', element: <RedZonePage /> },
     ],
   },
 ])

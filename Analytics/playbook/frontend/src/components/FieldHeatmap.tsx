@@ -566,7 +566,7 @@ export function MatchupFieldHeatmap({
           <div style={{ fontWeight: 700, color: 'var(--ink-2)', marginBottom: 4 }}>
             Not enough red-zone plays to chart
           </div>
-          {data.offense_team.abbr} has {playCount} red-zone {playCount === 1 ? 'play' : 'plays'} in this sample (need at least {RZ_MIN_PLAYS}). Try a longer game window.
+          {data.offense_team.abbr} has {playCount} red-zone {playCount === 1 ? 'play' : 'plays'} in this sample (need at least {RZ_MIN_PLAYS}).
         </div>
       )}
 
