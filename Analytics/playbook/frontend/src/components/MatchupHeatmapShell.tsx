@@ -6,15 +6,12 @@ import type {
   UpcomingMatchupsResponse,
 } from '../api';
 import { MatchupFieldHeatmap } from './FieldHeatmap';
-import { PHASE_LABEL, useSeason } from '../state';
+import { useSeason } from '../state';
 
 export interface WindowOption {
   value: number;
   label: string;
 }
-
-const HEAT_SUBTITLE =
-  'Offense overlayed on Defense for passing & rushing attack zones. Darker colors indicate high favorability (green = offense advantage) or non-favorability (red = defense advantage).';
 
 const DEFAULT_WINDOW_OPTIONS: WindowOption[] = [
   { value: 4, label: 'Last 4 games (recent form)' },
@@ -22,35 +19,23 @@ const DEFAULT_WINDOW_OPTIONS: WindowOption[] = [
   { value: 16, label: 'Full season' },
 ];
 
-export interface MatchupHeatmapShellProps {
-  fetchMatchup: (
-    teamA: string,
-    teamB: string,
-    season: number,
-    phase: string,
-    games: number,
-  ) => Promise<MatchupHeatmap>;
-  redZone?: boolean;
-  title: string;
-  subtitle?: string;
-  defaultWindow: number;
-  windowOptions?: WindowOption[];
-  note?: string;
-}
+// red-zone samples are small, so offer longer windows and start at 16 games
+const RED_ZONE_WINDOW_OPTIONS: WindowOption[] = [
+  { value: 8, label: 'Last 8 games' },
+  { value: 16, label: 'Last 16 games' },
+  { value: 32, label: 'Full season' },
+];
 
-export default function MatchupHeatmapShell({
-  fetchMatchup,
-  redZone,
-  title,
-  subtitle,
-  defaultWindow,
-  windowOptions = DEFAULT_WINDOW_OPTIONS,
-  note,
-}: MatchupHeatmapShellProps) {
+const RED_ZONE_NOTE = 'Distances are measured from the line of scrimmage; plays are capped at the goal line.';
+
+export default function MatchupHeatmapShell() {
+  const [redZone, setRedZone] = useState(false);
+  const fetchMatchup = redZone ? api.redzoneMatchup : api.heatmapMatchup;
+  const windowOptions = redZone ? RED_ZONE_WINDOW_OPTIONS : DEFAULT_WINDOW_OPTIONS;
   const { season, phase } = useSeason();
   const [teamA, setTeamA] = useState('MIA');
   const [teamB, setTeamB] = useState('DET');
-  const [gamesWindow, setGamesWindow] = useState(defaultWindow);
+  const [gamesWindow, setGamesWindow] = useState(4);
   const [upcoming, setUpcoming] = useState<UpcomingMatchupsResponse | null>(null);
   const [matchupData, setMatchupData] = useState<MatchupHeatmap | null>(null);
   const [loading, setLoading] = useState(false);
@@ -101,36 +86,20 @@ export default function MatchupHeatmapShell({
     setTeamB(away.abbr);
   };
 
-  const handleSwap = () => {
-    const nextA = teamB;
-    const nextB = teamA;
-    setTeamA(nextA);
-    setTeamB(nextB);
+  const toggleRedZone = () => {
+    const next = !redZone;
+    setRedZone(next);
+    setGamesWindow(next ? 16 : 4);
+    setSelectedZoneKey(null);
+    setSelectedGapKey(null);
+    setSelectedMapId(null);
   };
-
-  const allTeams = upcoming?.teams ?? [];
 
   return (
     <div>
-      {/* Page Header */}
-      <div className="page-head">
-        <h1>{title}</h1>
-        <span className="sub">
-          {season} {PHASE_LABEL[phase]?.toLowerCase()} · {subtitle ?? HEAT_SUBTITLE}
-        </span>
-      </div>
-
       {/* Upcoming Games Bar */}
       {upcoming && upcoming.matchups.length > 0 && (
         <div style={{ marginBottom: 20 }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-            <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink-2)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-              Week {upcoming.active_week} Matchups ({upcoming.matchups.length} games)
-            </span>
-            <span style={{ fontSize: 12, color: 'var(--muted)' }}>
-              Click any game to load dual overlay
-            </span>
-          </div>
           <div
             style={{
               display: 'flex',
@@ -183,142 +152,40 @@ export default function MatchupHeatmapShell({
         </div>
       )}
 
-      {/* Matchup Controls: Team Selectors & Sample Window */}
+      {/* Sample window */}
       <div
         style={{
-          padding: '14px 0',
+          padding: '4px 0 14px',
           marginBottom: 20,
-          borderTop: '1px solid var(--grid)',
           borderBottom: '1px solid var(--grid)',
           display: 'flex',
           alignItems: 'center',
-          justifyContent: 'space-between',
-          flexWrap: 'wrap',
-          gap: 16,
+          gap: 10,
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-          <span style={{ fontWeight: 700, fontSize: 14 }}>Matchup:</span>
-          {/* Team A Picker */}
-          <select
-            value={teamA}
-            onChange={(e) => setTeamA(e.target.value)}
-            style={{
-              padding: '6px 12px',
-              borderRadius: 8,
-              border: '1px solid var(--border)',
-              background: 'var(--surface)',
-              color: 'var(--ink)',
-              fontWeight: 700,
-            }}
-          >
-            {allTeams.map((t) => (
-              <option key={t.abbr} value={t.abbr} disabled={t.abbr === teamB}>
-                {t.name} ({t.abbr})
-              </option>
-            ))}
-          </select>
-
-          {/* Swap Button */}
-          <button
-            type="button"
-            onClick={handleSwap}
-            title="Swap Home/Away or Team Order"
-            style={{
-              background: 'var(--surface)',
-              border: '1px solid var(--border)',
-              borderRadius: 8,
-              padding: '6px 10px',
-              cursor: 'pointer',
-              color: 'var(--ink)',
-              fontWeight: 700,
-            }}
-          >
-            ⇄ Swap
-          </button>
-
-          {/* Team B Picker */}
-          <select
-            value={teamB}
-            onChange={(e) => setTeamB(e.target.value)}
-            style={{
-              padding: '6px 12px',
-              borderRadius: 8,
-              border: '1px solid var(--border)',
-              background: 'var(--surface)',
-              color: 'var(--ink)',
-              fontWeight: 700,
-            }}
-          >
-            {allTeams.map((t) => (
-              <option key={t.abbr} value={t.abbr} disabled={t.abbr === teamA}>
-                {t.name} ({t.abbr})
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <label style={{ fontSize: 13, color: 'var(--muted)' }}>Sample Window:</label>
-          <select
-            value={gamesWindow}
-            onChange={(e) => setGamesWindow(Number(e.target.value))}
-            style={{
-              padding: '6px 10px',
-              borderRadius: 8,
-              border: '1px solid var(--border)',
-              background: 'var(--surface)',
-              color: 'var(--ink)',
-              fontSize: 13,
-            }}
-          >
-            {windowOptions.map((o) => (
-              <option key={o.value} value={o.value}>{o.label}</option>
-            ))}
-          </select>
-        </div>
+        <label htmlFor="sample-window" style={{ fontSize: 13, color: 'var(--muted)' }}>Sample window</label>
+        <select
+          id="sample-window"
+          value={gamesWindow}
+          onChange={(e) => setGamesWindow(Number(e.target.value))}
+          style={{
+            padding: '6px 10px',
+            borderRadius: 8,
+            border: '1px solid var(--border)',
+            background: 'var(--surface)',
+            color: 'var(--ink)',
+            fontSize: 13,
+          }}
+        >
+          {windowOptions.map((o) => (
+            <option key={o.value} value={o.value}>{o.label}</option>
+          ))}
+        </select>
       </div>
 
-      {note && (
-        <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 12 }}>{note}</div>
+      {redZone && (
+        <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 12 }}>{RED_ZONE_NOTE}</div>
       )}
-
-      {/* Favorability Legend Banner */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'flex-start',
-          flexWrap: 'wrap',
-          gap: 16,
-          padding: '0',
-          marginBottom: 20,
-          fontSize: 12,
-          color: 'var(--ink-2)',
-        }}
-      >
-        <span style={{ fontWeight: 700, color: 'var(--ink)' }}>Heat Color Guide:</span>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ width: 14, height: 14, borderRadius: 3, background: '#10b981', display: 'inline-block' }} />
-          <span>Strong Offense Advantage (High Favorable)</span>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ width: 14, height: 14, borderRadius: 3, background: '#34d399', display: 'inline-block' }} />
-          <span>Lean Offense</span>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ width: 14, height: 14, borderRadius: 3, background: 'var(--muted)', opacity: 0.5, display: 'inline-block' }} />
-          <span>Neutral</span>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ width: 14, height: 14, borderRadius: 3, background: '#fde047', display: 'inline-block' }} />
-          <span>Lean Defense</span>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ width: 14, height: 14, borderRadius: 3, background: '#eab308', display: 'inline-block' }} />
-          <span>Strong Defense Advantage (Yellow)</span>
-        </div>
-      </div>
 
       {/* Loading & Error States */}
       {loading && (
@@ -345,17 +212,10 @@ export default function MatchupHeatmapShell({
         >
           {/* Map 1: Team A Offense vs Team B Defense */}
           <div>
-            <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span className="badge" style={{ background: 'transparent', color: 'var(--series-1)', border: '1px solid currentColor', fontWeight: 700 }}>
-                Map 1
-              </span>
-              <h2 style={{ margin: 0, fontSize: 16, fontWeight: 600, letterSpacing: '-0.01em' }}>
-                {matchupData.map_a_vs_b.title}
-              </h2>
-            </div>
             <MatchupFieldHeatmap
               data={matchupData.map_a_vs_b}
               redZone={redZone}
+              onToggleRedZone={toggleRedZone}
               mapId="map_a"
               linkedZoneKey={hoveredZoneKey ?? (selectedMapId === 'map_b' ? selectedZoneKey : null)}
               onHoverZoneKey={setHoveredZoneKey}
@@ -379,17 +239,10 @@ export default function MatchupHeatmapShell({
 
           {/* Map 2: Team B Offense vs Team A Defense */}
           <div>
-            <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span className="badge" style={{ background: 'transparent', color: 'var(--series-2)', border: '1px solid currentColor', fontWeight: 700 }}>
-                Map 2
-              </span>
-              <h2 style={{ margin: 0, fontSize: 16, fontWeight: 600, letterSpacing: '-0.01em' }}>
-                {matchupData.map_b_vs_a.title}
-              </h2>
-            </div>
             <MatchupFieldHeatmap
               data={matchupData.map_b_vs_a}
               redZone={redZone}
+              onToggleRedZone={toggleRedZone}
               mapId="map_b"
               linkedZoneKey={hoveredZoneKey ?? (selectedMapId === 'map_a' ? selectedZoneKey : null)}
               onHoverZoneKey={setHoveredZoneKey}

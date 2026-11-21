@@ -296,8 +296,10 @@ export interface MatchupHeatmapProps {
   selectedGapKey?: string | null;
   onSelectGapKey?: (key: string | null, mapId: 'map_a' | 'map_b') => void;
   selectedMapId?: 'map_a' | 'map_b' | null;
-  // Zoomed 0-20 yard field for the Red-Zone tab
+  // Zoomed 0-20 yard field when the dashboard is in red-zone mode
   redZone?: boolean;
+  // When given, a "Red zone" toggle button is shown next to Play trails
+  onToggleRedZone?: () => void;
 }
 
 export function MatchupFieldHeatmap({
@@ -313,6 +315,7 @@ export function MatchupFieldHeatmap({
   onSelectGapKey,
   selectedMapId,
   redZone,
+  onToggleRedZone,
 }: MatchupHeatmapProps) {
   const fieldScale = redZone ? RED_ZONE_SCALE : FULL_FIELD_SCALE;
   const [view, setView] = useState<'both' | 'pass' | 'run'>('both');
@@ -554,6 +557,26 @@ export function MatchupFieldHeatmap({
             />
             Play trails
           </label>
+
+          {onToggleRedZone && (
+            <button
+              type="button"
+              aria-pressed={!!redZone}
+              onClick={onToggleRedZone}
+              style={{
+                padding: '4px 11px',
+                fontSize: 12,
+                fontWeight: redZone ? 600 : 500,
+                borderRadius: 999,
+                border: redZone ? '1px solid var(--ink)' : '1px solid var(--border)',
+                background: redZone ? 'var(--ink)' : 'transparent',
+                color: redZone ? 'var(--page)' : 'var(--ink-2)',
+                cursor: 'pointer',
+              }}
+            >
+              Red zone
+            </button>
+          )}
         </div>
       </div>
 
