@@ -158,3 +158,50 @@ def test_upcoming_matchups(test_db):
     assert m["home"]["abbr"] == "MIA"
     assert m["away"]["abbr"] == "DET"
 
+
+
+def _add_yardline_plays(session):
+    """Passes at yardline_100 = 8, 20, 21 for MIA offense and for DET offense (MIA defense)."""
+    plays = []
+    for base, off, de in ((100, "MIA", "DET"), (200, "DET", "MIA")):
+        for i, yl in enumerate((8, 20, 21)):
+            plays.append(Play(
+                game_id="2026_01_MIA_DET", play_id=base + i, posteam=off, defteam=de,
+                play_type="pass", pass_location="middle", pass_depth="short",
+                air_yards=4.0, yards_gained=4.0, complete_pass=True, touchdown=False,
+                epa=0.1, success=True, yardline_100=yl))
+    session.add_all(plays)
+    session.commit()
+
+
+def _pass_ids(data, side):
+    return {v["play_id"] for v in data[side]["passing"]["plays"]}
+
+
+def test_team_field_heatmap_red_zone_filters_both_sides(test_db):
+    _add_yardline_plays(test_db)
+    data = team_field_heatmap(test_db, "MIA", 2026, "reg", last_n_games=4, red_zone=True)
+    # 8 and 20 kept; 21 and NULL (fixture plays p1/p2) dropped
+    assert _pass_ids(data, "offense") == {100, 101}
+    assert _pass_ids(data, "defense") == {200, 201}
+    assert data["offense"]["rushing"]["plays"] == []
+    for v in data["offense"]["passing"]["plays"]:
+        assert v["yardline_100"] <= 20
+
+
+def test_team_field_heatmap_default_returns_all(test_db):
+    _add_yardline_plays(test_db)
+    data = team_field_heatmap(test_db, "MIA", 2026, "reg", last_n_games=4)
+    assert _pass_ids(data, "offense") == {1, 2, 100, 101, 102}
+    assert _pass_ids(data, "defense") == {200, 201, 202}
+    assert data["offense"]["rushing"]["plays"]
+    assert "yardline_100" in data["offense"]["rushing"]["plays"][0]
+
+
+def test_matchup_heatmap_red_zone(test_db):
+    _add_yardline_plays(test_db)
+    data = matchup_heatmap(test_db, "MIA", "DET", 2026, "reg", last_n_games=4, red_zone=True)
+    assert data["map_a_vs_b"]["title"] == "MIA Offense vs DET Defense"
+    mid = next(z for z in data["map_a_vs_b"]["passing_zones"]
+               if z["location"] == "middle" and z["depth_band"] == "short")
+    assert mid["offense"]["attempts"] == 2

@@ -141,6 +141,16 @@ def heatmap_matchup(response: Response, teamA: str, teamB: str, season: int,
     return matchup_heatmap(db, teamA.upper(), teamB.upper(), season, phase, last_n_games=games)
 
 
+@router.get("/heatmap/redzone/matchup")
+def heatmap_redzone_matchup(response: Response, teamA: str, teamB: str, season: int,
+                            phase: str, games: int = 16,
+                            db: Session = Depends(get_db)):
+    """Matchup heatmap overlays restricted to red-zone plays (yardline_100 <= 20)."""
+    response.headers["Cache-Control"] = f"public, max-age={CACHE_SECONDS}"
+    return matchup_heatmap(db, teamA.upper(), teamB.upper(), season, phase,
+                           last_n_games=games, red_zone=True)
+
+
 @router.get("/heatmap/team")
 def heatmap_team(response: Response, team: str, season: int, phase: str,
                  games: int = 4, db: Session = Depends(get_db)):

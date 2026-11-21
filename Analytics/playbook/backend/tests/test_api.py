@@ -108,3 +108,17 @@ def test_health_ok_after_a_successful_sync(client, session):
     session.commit()
     r = client.get("/api/health")
     assert r.status_code == 200 and r.json()["status"] == "ok"
+
+
+def test_heatmap_redzone_matchup(client):
+    g = client.game
+    q = {"teamA": g["home_team"], "teamB": g["away_team"],
+         "season": g["season"], "phase": g["phase"]}
+    r = client.get("/api/heatmap/redzone/matchup", params=q)
+    assert r.status_code == 200
+    assert "Cache-Control" in r.headers
+    body = r.json()
+    assert body["sample_games_window"] == 16
+    assert "map_a_vs_b" in body and "map_b_vs_a" in body
+    r2 = client.get("/api/heatmap/redzone/matchup", params={**q, "games": 3})
+    assert r2.json()["sample_games_window"] == 3
