@@ -52,8 +52,8 @@ In your first terminal:
 cd backend
 
 # 2. Create and activate a Python virtual environment
-python3 -m venv .venv
-source .venv/bin/activate       # On Windows use: .venv\Scripts\activate
+python3 -m venv playbook_venv
+source playbook_venv/bin/activate       # On Windows use: playbook_venv\Scripts\activate
 
 # 3. Install backend dependencies
 pip install -r requirements.txt

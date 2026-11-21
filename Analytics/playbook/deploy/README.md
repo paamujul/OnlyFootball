@@ -96,11 +96,13 @@ gcloud run jobs deploy playbook-seed \
   --service-account $RUNTIME_SA \
   --set-cloudsql-instances $SQL \
   --set-secrets DATABASE_URL=playbook-database-url:latest \
-  --memory 2Gi --task-timeout 3600 --max-retries 0 \
-  --command python --args -m,app.cli,seed
+  --memory 4Gi --task-timeout 3600 --max-retries 0 \
+  --command python "--args=-m,app.cli,seed"
 
 gcloud run jobs execute playbook-seed --region $REGION --project $PROJECT_ID --wait
 ```
+
+> Use the `--args=...` form: gcloud rejects `--args -m,...` because the value starts with `-`. The seed needs 4Gi: at 2Gi it was OOM-killed during the last season (data had already loaded, but the run reported failure).
 
 The seed job exits 0 even if individual downloads fail (failures are recorded in
 `sync_log`). After it finishes, confirm data actually loaded:
@@ -115,7 +117,7 @@ gcloud run jobs deploy playbook-refresh \
   --set-cloudsql-instances $SQL \
   --set-secrets DATABASE_URL=playbook-database-url:latest \
   --memory 2Gi --task-timeout 1800 --max-retries 1 \
-  --command python --args -m,app.cli,refresh-nflverse,2026
+  --command python "--args=-m,app.cli,refresh-nflverse,2026"
 
 # Allow the runtime SA to trigger the job
 gcloud run jobs add-iam-policy-binding playbook-refresh \
@@ -141,7 +143,7 @@ gcloud run jobs deploy playbook-train \
   --set-cloudsql-instances $SQL \
   --set-secrets DATABASE_URL=playbook-database-url:latest \
   --memory 4Gi --cpu 2 --task-timeout 3600 --max-retries 0 \
-  --command python --args -m,app.cli,train,2025
+  --command python "--args=-m,app.cli,train,2025"
 
 gcloud run jobs execute playbook-train --region $REGION --project $PROJECT_ID --wait
 ```
