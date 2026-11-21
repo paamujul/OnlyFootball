@@ -9,8 +9,8 @@ The Heat map tab (`/heatmap`, `frontend/src/pages/HeatmapPage.tsx`) shows, per u
 - **Default sample window 16 games**; the select offers 8, 16 and Full season.
 - **Separate endpoint** `GET /heatmap/redzone/matchup?teamA&teamB&season&phase&games=16`, same `Cache-Control: public, max-age=300` as the other heatmap routes. Reuse `/heatmap/upcoming`. Do not add a flag to the existing routes.
 - **No behaviour change to `/heatmap`**: default arguments must keep today's output byte-for-byte.
-- Reuse existing code; do not duplicate aggregation. No new dependencies. No commit trailers mentioning Claude/AI (commits are authored by the user alone).
-- Backend tests: `cd backend && ./playbook_venv/bin/python -m pytest` (the venv lives in the main checkout at `/Users/sainathagoudpaamujula/Desktop/OnlyFootball/Analytics/playbook/backend/playbook_venv`; use it by absolute path from the worktree's `backend/`). Frontend: symlink `frontend/node_modules` to the main checkout's, then `npm run lint && npm run build` must stay at 0 errors (existing warnings are fine).
+- Reuse existing code; do not duplicate aggregation. No new dependencies. Commits are authored by the user alone; no co-author trailers.
+- Backend tests: `cd backend && ./playbook_venv/bin/python -m pytest` (the venv lives in the main checkout at the main checkout's `backend/playbook_venv`; use it by absolute path from the worktree's `backend/`). Frontend: symlink `frontend/node_modules` to the main checkout's, then `npm run lint && npm run build` must stay at 0 errors (existing warnings are fine).
 
 ### Task 1: Backend red-zone filter, endpoint and tests
 Files: `backend/app/analytics/heatmap.py`, `backend/app/api/routes.py`, `backend/tests/test_heatmap.py`.
