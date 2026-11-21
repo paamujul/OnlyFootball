@@ -5,6 +5,7 @@ export interface TeamTotals {
   color: string | null; color2: string | null; logo: string | null;
   games: number; pass_yds: number; rush_yds: number; rec_yds: number;
   pass_td: number; rush_td: number; rec_td: number;
+  wins: number; losses: number; ties: number;
 }
 
 export interface SeasonPhases {

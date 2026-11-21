@@ -59,9 +59,6 @@ export default function App() {
       <header className="topbar">
         <NavLink to="/" className="brand">NFL<span>·</span>Analytics</NavLink>
         <nav>
-          <NavLink to="/" end className={({ isActive }) => (isActive ? 'active' : '')}>Teams</NavLink>
-          <NavLink to="/compare" className={({ isActive }) => (isActive ? 'active' : '')}>Compare</NavLink>
-          <NavLink to="/defense" className={({ isActive }) => (isActive ? 'active' : '')}>Defense lab</NavLink>
           {/* no `end`: stays lit on /coach/:abbr too */}
           <NavLink to="/coach" className={({ isActive }) => (isActive ? 'active' : '')}>Coaching</NavLink>
           <NavLink to="/heatmap" className={({ isActive }) => (isActive ? 'active' : '')}>Heat map</NavLink>

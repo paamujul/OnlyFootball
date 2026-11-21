@@ -391,3 +391,8 @@ h2.section small { font-weight: 400; }
 
 /* selects and plain buttons in control rows */
 .controls select { border-radius: var(--radius); font-size: 13.5px; }
+
+/* Coaching index: teams are ordered conference > division > standing, so a row of four is one division */
+.teams-grid:not(:has(.yard-rows)) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (min-width: 1000px) { .teams-grid:not(:has(.yard-rows)) { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+@media (max-width: 599px) { .teams-grid:not(:has(.yard-rows)) { grid-template-columns: 1fr; } }
